@@ -9,5 +9,19 @@
     </style>
     <style name="AppTheme.AppBarOverlay" parent="ThemeOverlay.MaterialComponents.Dark.ActionBar"/>
     <style name="AppTheme.PopupOverlay" parent="ThemeOverlay.MaterialComponents.Light"/>
+    <style name="Theme.Chimera" parent="Base.Theme.Chimera" />
+
+    <!--
+    THIS IS THE NEW, CRITICAL STYLE DEFINITION THAT WAS MISSING.
+    ADD THIS ENTIRE <style> BLOCK TO YOUR FILE.
+    -->
+    <style name="Theme.AppCompat.Transparent.NoActionBar" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">false</item>
+    </style>
 
 </resources>
