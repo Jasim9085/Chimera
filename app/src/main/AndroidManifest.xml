@@ -9,8 +9,7 @@
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <!-- ADDED THIS PERMISSION TO SAVE THE ERROR LOG FILE -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <!-- WRITE_EXTERNAL_STORAGE REMOVED - IT'S NO LONGER NEEDED -->
 
     <application
         android:name=".ChimeraApplication"
