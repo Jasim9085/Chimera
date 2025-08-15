@@ -16,13 +16,14 @@ public class ErrorLogger {
 
     public static void logError(Context context, String tag, Throwable throwable) {
         try {
-            // Use the public Documents directory which is better for modern Android
-            File documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
-            if (!documentsDir.exists()) {
-                documentsDir.mkdirs(); // Create the directory if it doesn't exist
+            // UPDATED: Use the app-specific external files directory. NO PERMISSION NEEDED.
+            File logDir = context.getExternalFilesDir(null);
+            if (logDir == null) {
+                // Handle case where external storage is not available
+                return;
             }
 
-            File logFile = new File(documentsDir, LOG_FILE);
+            File logFile = new File(logDir, LOG_FILE);
 
             // Use FileWriter to append to the file
             FileWriter fw = new FileWriter(logFile, true);
