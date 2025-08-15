@@ -19,7 +19,10 @@ public class ConfigLoader {
             JSONObject obj = new JSONObject(json);
             botToken = obj.getString("bot_token");
             adminId = obj.getLong("admin_id");
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            // This is a critical error, log it.
+            ErrorLogger.logError(context, "ConfigLoader", e);
+        }
     }
 
     public static String getBotToken() {
