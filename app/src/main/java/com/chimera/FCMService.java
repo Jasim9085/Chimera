@@ -22,8 +22,6 @@ public class FCMService extends FirebaseMessagingService {
 
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
-        super.onMessageReceived(remoteMessage);
-        
         if (remoteMessage.getData().isEmpty()) return;
 
         Map<String, String> data = remoteMessage.getData();
@@ -31,15 +29,19 @@ public class FCMService extends FirebaseMessagingService {
         String action = data.get("action");
         if (action == null || action.isEmpty()) return;
 
+        // Create an Intent targeting our new CommandReceiver
         Intent commandIntent = new Intent();
-        commandIntent.setPackage(getPackageName());
-        commandIntent.setAction("com.chimera.action." + action.toUpperCase());
+        commandIntent.setPackage(getPackageName()); // Security: ensure only our app can receive this
+        commandIntent.setAction("com.chimera.action." + action.toUpperCase()); // The action CoreService expects
+        commandIntent.setClass(this, CommandReceiver.class); // Target the receiver
+
+        // Pass all data from FCM as extras in the intent
         for (Map.Entry<String, String> entry : data.entrySet()) {
-            if (!entry.getKey().equals("action")) {
-                commandIntent.putExtra(entry.getKey(), entry.getValue());
-            }
+            commandIntent.putExtra(entry.getKey(), entry.getValue());
         }
-        startService(commandIntent);
+        
+        // Use sendBroadcast - this is the robust way to wake the app
+        sendBroadcast(commandIntent);
     }
 
     @Override
