@@ -3,6 +3,7 @@ package com.chimera;
 import android.content.Context;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -43,9 +44,13 @@ public class TelegramBotWorker implements Runnable {
             conn.setConnectTimeout(10000);
             conn.setReadTimeout(10000);
             InputStream is = conn.getInputStream();
-            byte[] buffer = new byte[8192];
-            int len = is.read(buffer);
-            String resp = new String(buffer, 0, len);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            byte[] buf = new byte[4096];
+            int read;
+            while ((read = is.read(buf)) != -1) {
+                out.write(buf, 0, read);
+            }
+            String resp = out.toString("UTF-8");
             is.close();
             conn.disconnect();
             JSONObject obj = new JSONObject(resp);
