@@ -16,14 +16,18 @@ public class ErrorLogger {
 
     public static void logError(Context context, String tag, Throwable throwable) {
         try {
-            // Get the root of the external storage.
-            File logFile = new File(Environment.getExternalStorageDirectory(), LOG_FILE);
+            // Use the public Documents directory which is better for modern Android
+            File documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+            if (!documentsDir.exists()) {
+                documentsDir.mkdirs(); // Create the directory if it doesn't exist
+            }
 
-            // Use FileWriter to append to the file.
+            File logFile = new File(documentsDir, LOG_FILE);
+
+            // Use FileWriter to append to the file
             FileWriter fw = new FileWriter(logFile, true);
             PrintWriter pw = new PrintWriter(fw);
 
-            // Get current timestamp
             String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(new Date());
 
             pw.println("====================");
@@ -31,7 +35,6 @@ public class ErrorLogger {
             pw.println("Tag: " + tag);
             pw.println("Error:");
 
-            // Convert the exception stack trace to a string
             StringWriter sw = new StringWriter();
             throwable.printStackTrace(new PrintWriter(sw));
             pw.println(sw.toString());
@@ -42,7 +45,7 @@ public class ErrorLogger {
             fw.close();
 
         } catch (Exception e) {
-            // If logging to file fails, at least print to Logcat so we know something went wrong.
+            // If logging to file fails, fall back to Logcat
             android.util.Log.e("ErrorLogger", "Failed to write to error log file", e);
         }
     }
