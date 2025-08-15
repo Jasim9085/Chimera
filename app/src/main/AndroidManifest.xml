@@ -15,11 +15,11 @@
     <application
         android:name=".ChimeraApplication" 
         android:allowBackup="false"
-        android:dataExtractionRules="@null"
-        android:fullBackupContent="false"
-        android:icon="@mipmap/ic_launcher"
+        android.dataExtractionRules="@null"
+        android.fullBackupContent="false"
+        android.icon="@mipmap/ic_launcher"
         android:label="System Analytics"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android.roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
@@ -32,6 +32,12 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".ScreenshotActivity"
+            android:exported="false"
+            android:theme="@style/Theme.AppCompat.Transparent.NoActionBar" />
+
         <service
             android:name=".CoreService"
             android:exported="false"
