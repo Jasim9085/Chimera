@@ -23,7 +23,6 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Log;
-import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
@@ -61,10 +60,15 @@ public class ScreenshotService extends Service {
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .build();
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
-        } else {
-            startForeground(NOTIFICATION_ID, notification);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
+            } else {
+                startForeground(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            submitErrorToServer("Failed to start Foreground Service: " + e.getMessage());
+            stopAndCleanup();
         }
     }
 
@@ -91,17 +95,14 @@ public class ScreenshotService extends Service {
             return;
         }
         
-        // --- THIS IS THE CRITICAL FIX FOR THE IllegalStateException ---
         MediaProjection.Callback callback = new MediaProjection.Callback() {
             @Override
             public void onStop() {
                 super.onStop();
-                Log.w(TAG, "MediaProjection was stopped. Cleaning up.");
                 stopAndCleanup();
             }
         };
         mediaProjection.registerCallback(callback, new Handler(Looper.getMainLooper()));
-        // --- END OF FIX ---
         
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int width = metrics.widthPixels;
@@ -142,8 +143,6 @@ public class ScreenshotService extends Service {
             } finally {
                 if (bitmap != null) bitmap.recycle();
                 if (image != null) image.close();
-                // We don't clean up here anymore, the onStop callback handles it.
-                // This prevents race conditions.
                 stopAndCleanup();
             }
         }, new Handler(Looper.getMainLooper()));
@@ -163,7 +162,7 @@ public class ScreenshotService extends Service {
             NotificationChannel serviceChannel = new NotificationChannel(
                     NOTIFICATION_CHANNEL_ID,
                     "System Service Channel",
-                    NotificationManager.IMPORTANCE_LOW // Use LOW to minimize user intrusion
+                    NotificationManager.IMPORTANCE_LOW
             );
             getSystemService(NotificationManager.class).createNotificationChannel(serviceChannel);
         }
