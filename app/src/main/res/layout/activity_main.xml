@@ -1,102 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#121212"
-    android:padding="20dp"
-    tools:context=".MainActivity">
+    android:gravity="center"
+    android:orientation="vertical"
+    android:padding="24dp">
 
     <TextView
-        android:id="@+id/tvTitle"
+        android:id="@+id/textTitle"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="System Analytics"
-        android:textColor="#FFFFFF"
+        android:text="Chimera"
         android:textSize="24sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/tvStatusHeader"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/tvTitle"
-        android:layout_marginTop="20dp"
-        android:text="System Integrity Check:"
-        android:textColor="#AFAFAF"
-        android:textSize="16sp"/>
-
-    <LinearLayout
-        android:id="@+id/llChecklist"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_below="@id/tvStatusHeader"
-        android:layout_marginTop="10dp"
-        android:orientation="vertical">
-
-        <TextView
-            android:id="@+id/tvCheckPermissions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?android:attr/selectableItemBackground"
-            android:padding="12dp"
-            android:text="Core Permissions"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp" />
-
-        <TextView
-            android:id="@+id/tvCheckAccessibility"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?android:attr/selectableItemBackground"
-            android:layout_marginTop="8dp"
-            android:padding="12dp"
-            android:text="System Overlay Service"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp" />
-        
-        <!-- NEW CHECKLIST ITEM -->
-        <TextView
-            android:id="@+id/tvCheckProjection"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:clickable="true"
-            android:focusable="true"
-            android:background="?android:attr/selectableItemBackground"
-            android:layout_marginTop="8dp"
-            android:padding="12dp"
-            android:text="Screen Capture Service"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp" />
-
-    </LinearLayout>
-
-    <TextView
-        android:id="@+id/tvDeviceInfo"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_above="@+id/btnFinalize"
-        android:layout_marginBottom="16dp"
-        android:background="#222222"
-        android:fontFamily="monospace"
-        android:padding="8dp"
-        android:textColor="#00FF00"
-        android:textSize="12sp"
-        android:textIsSelectable="true"/>
+        android:layout_marginBottom="40dp" />
 
     <Button
-        android:id="@+id/btnFinalize"
+        android:id="@+id/btnContinue"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_alignParentBottom="true"
-        android:padding="12dp"
-        android:text="Activate"
-        android:enabled="false"
-        android:backgroundTint="#444444"
-        android:textColor="#888888"/>
+        android:text="Continue"
+        android:layout_marginBottom="20dp" />
 
-</RelativeLayout>
+    <Button
+        android:id="@+id/btnHide"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Hide Icon" />
+</LinearLayout>
