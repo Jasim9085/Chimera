@@ -8,10 +8,14 @@ public class ChimeraApplication extends Application {
         super.onCreate();
         try {
             ConfigLoader.load(this);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "ChimeraApplication_Config", e);
+        }
         try {
             CrashHandler handler = new CrashHandler(this);
             Thread.setDefaultUncaughtExceptionHandler(handler);
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "ChimeraApplication_CrashHandler", e);
+        }
     }
 }
