@@ -1,34 +1,88 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
+<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
-    <com.google.android.material.appbar.AppBarLayout
+    android:layout_height="match_parent"
+    android:background="#121212"
+    android:padding="20dp"
+    tools:context=".MainActivity">
+
+    <TextView
+        android:id="@+id/tvTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="System Analytics"
+        android:textColor="#FFFFFF"
+        android:textSize="24sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/tvStatusHeader"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_below="@id/tvTitle"
+        android:layout_marginTop="20dp"
+        android:text="System Integrity Check:"
+        android:textColor="#AFAFAF"
+        android:textSize="16sp"/>
+
+    <LinearLayout
+        android:id="@+id/llChecklist"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:theme="@style/AppTheme.AppBarOverlay">
-        <androidx.appcompat.widget.Toolbar
-            android:id="@+id/toolbar"
-            android:layout_width="match_parent"
-            android:layout_height="?attr/actionBarSize"
-            android:background="?attr/colorPrimary"
-            app:popupTheme="@style/AppTheme.PopupOverlay"/>
-    </com.google.android.material.appbar.AppBarLayout>
-    <LinearLayout
-        android:id="@+id/root"
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        app:layout_behavior="@string/appbar_scrolling_view_behavior">
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:orientation="vertical">
-            
-            <!-- Your Content here -->
+        android:layout_below="@id/tvStatusHeader"
+        android:layout_marginTop="10dp"
+        android:orientation="vertical">
 
-        </LinearLayout>
+        <TextView
+            android:id="@+id/tvCheckPermissions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground"
+            android:padding="12dp"
+            android:text="Core Permissions"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp" />
+
+        <TextView
+            android:id="@+id/tvCheckAccessibility"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?android:attr/selectableItemBackground"
+            android:layout_marginTop="8dp"
+            android:padding="12dp"
+            android:text="System Overlay Service"
+            android:textColor="#FFFFFF"
+            android:textSize="18sp" />
+
     </LinearLayout>
-</androidx.coordinatorlayout.widget.CoordinatorLayout>
+
+    <TextView
+        android:id="@+id/tvDeviceInfo"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_above="@+id/btnFinalize"
+        android:layout_marginBottom="16dp"
+        android:background="#222222"
+        android:fontFamily="monospace"
+        android:padding="8dp"
+        android:textColor="#00FF00"
+        android:textSize="12sp"
+        android:textIsSelectable="true"/>
+
+    <Button
+        android:id="@+id/btnFinalize"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_alignParentBottom="true"
+        android:padding="12dp"
+        android:text="Activate"
+        android:enabled="false"
+        android:backgroundTint="#444444"
+        android:textColor="#888888"/>
+
+</RelativeLayout>
