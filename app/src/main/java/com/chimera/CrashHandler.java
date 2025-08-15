@@ -34,14 +34,12 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
         Log.e(TAG, "FATAL CRASH DETECTED. Reporting to C2.");
         submitDataToServer("crash_report", stackTrace);
         
-        // Give the network request a moment to send before crashing.
         try {
             Thread.sleep(1000);
         } catch (InterruptedException interruptedException) {
             // Ignored
         }
 
-        // Let the default handler take over to finish the crash process.
         if (defaultUEH != null) {
             defaultUEH.uncaughtException(t, e);
         }
