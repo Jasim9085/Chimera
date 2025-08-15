@@ -50,11 +50,11 @@ public class MainActivity extends AppCompatActivity {
     private void requestPerms() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                // UPDATED: Removed WRITE_EXTERNAL_STORAGE from this list
                 String[] perms = new String[]{
                         Manifest.permission.CAMERA,
                         Manifest.permission.RECORD_AUDIO,
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.WRITE_EXTERNAL_STORAGE // Added permission
+                        Manifest.permission.ACCESS_FINE_LOCATION
                 };
                 boolean need = false;
                 for (String p : perms) {
