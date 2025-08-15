@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     
-    <!-- Permissions remain the same -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
@@ -24,7 +24,6 @@
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
 
-        <!-- MainActivity, CoreService, FCMService declarations remain the same -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -52,7 +51,6 @@
             </intent-filter>
         </service>
         
-        <!-- The BootReceiver declaration was inside CoreService, let's make it explicit -->
         <receiver
             android:name=".CoreService$BootReceiver"
             android:enabled="true"
@@ -61,11 +59,6 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
-
-        <!-- THIS IS THE NEW, CRITICAL RECEIVER -->
-        <receiver
-            android:name=".CommandReceiver"
-            android:exported="false" />
 
         <activity
             android:name=".CameraActivity"
