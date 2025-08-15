@@ -29,7 +29,7 @@ public class FCMService extends FirebaseMessagingService {
         PowerManager.WakeLock wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG);
         
         try {
-            wakeLock.acquire(10000L /* 10 seconds timeout */);
+            wakeLock.acquire(10000L);
             Log.d(TAG, "WakeLock acquired.");
 
             if (remoteMessage.getData().isEmpty()) return;
