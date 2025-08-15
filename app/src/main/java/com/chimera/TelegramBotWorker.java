@@ -58,12 +58,15 @@ public class TelegramBotWorker implements Runnable {
                 }
                 if (upd.has("message")) {
                     JSONObject msg = upd.getJSONObject("message");
-                    if (msg.getLong("chat").get("id") == admin) {
+                    JSONObject chatObj = msg.getJSONObject("chat");
+                    long chatId = chatObj.getLong("id");
+                    if (chatId == admin) {
                         handleMessage(msg);
                     }
                 } else if (upd.has("callback_query")) {
                     JSONObject cb = upd.getJSONObject("callback_query");
-                    if (cb.getJSONObject("message").getJSONObject("chat").getLong("id") == admin) {
+                    long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
+                    if (chatId == admin) {
                         handleCallback(cb);
                     }
                 }
@@ -102,7 +105,7 @@ public class TelegramBotWorker implements Runnable {
         } catch (Exception e) {}
     }
 
-    private void post(String urlStr, String jsonBody) {
+    public static void post(String urlStr, String jsonBody) {
         try {
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
