@@ -23,8 +23,9 @@
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
 
+        <!-- THIS IS THE ONLY LAUNCHER ACTIVITY -->
         <activity
-            android:name=".ProvisioningActivity"
+            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
