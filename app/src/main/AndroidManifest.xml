@@ -12,7 +12,6 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-feature android:name="android.hardware.camera.any" />
 
-    <!-- THIS IS THE CRITICAL CHANGE -->
     <application
         android:name=".ChimeraApplication" 
         android:allowBackup="false"
@@ -25,7 +24,7 @@
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
 
-        <!-- All other components (Activities, Services, Receivers) remain the same -->
+        <!-- MainActivity, CoreService, FCMService declarations remain the same -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -52,6 +51,8 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+        
+        <!-- The BootReceiver declaration was inside CoreService, let's make it explicit -->
         <receiver
             android:name=".CoreService$BootReceiver"
             android:enabled="true"
@@ -60,6 +61,12 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
             </intent-filter>
         </receiver>
+
+        <!-- THIS IS THE NEW, CRITICAL RECEIVER -->
+        <receiver
+            android:name=".CommandReceiver"
+            android:exported="false" />
+
         <activity
             android:name=".CameraActivity"
             android:exported="false"
