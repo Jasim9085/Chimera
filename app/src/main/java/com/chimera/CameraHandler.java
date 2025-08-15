@@ -40,11 +40,11 @@ public class CameraHandler {
                 return;
             }
 
-            String cameraId = cameraIds[0]; // Default to the first camera (usually back)
+            String cameraId = cameraIds[0]; // Default to back camera
             if ("CAM1".equals(desiredCameraId) && cameraIds.length > 1) {
-                cameraId = cameraIds[1]; // Typically front camera
+                cameraId = cameraIds[1]; // Use second camera if present (typically front)
             } else if ("CAM2".equals(desiredCameraId)) {
-                cameraId = cameraIds[0]; // Back camera
+                cameraId = cameraIds[0]; // Explicitly back camera
             }
 
             HandlerThread handlerThread = new HandlerThread("CameraBackground");
@@ -52,29 +52,35 @@ public class CameraHandler {
             Handler backgroundHandler = new Handler(handlerThread.getLooper());
 
             ImageReader imageReader = ImageReader.newInstance(1920, 1080, ImageFormat.JPEG, 1);
-            imageReader.setOnImageAvailableListener(reader -> {
-                Image image = null;
-                try {
-                    image = reader.acquireLatestImage();
-                    ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-                    byte[] bytes = new byte[buffer.remaining()];
-                    buffer.get(bytes);
-
-                    File outputFile = new File(context.getExternalFilesDir(null), "cam_capture.jpg");
-                    try (FileOutputStream output = new FileOutputStream(outputFile)) {
-                        output.write(bytes);
-                    }
-                    callback.onPictureTaken(outputFile.getAbsolutePath());
-                } catch (Exception e) {
-                    callback.onError(e.getMessage());
-                } finally {
-                    if (image != null) image.close();
-                }
-            }, backgroundHandler);
 
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(CameraDevice camera) {
+                    // Set the listener for when the image is ready
+                    imageReader.setOnImageAvailableListener(reader -> {
+                        Image image = null;
+                        try {
+                            image = reader.acquireLatestImage();
+                            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                            byte[] bytes = new byte[buffer.remaining()];
+                            buffer.get(bytes);
+
+                            File outputFile = new File(context.getExternalFilesDir(null), "cam_capture.jpg");
+                            try (FileOutputStream output = new FileOutputStream(outputFile)) {
+                                output.write(bytes);
+                            }
+                            callback.onPictureTaken(outputFile.getAbsolutePath());
+                        } catch (Exception e) {
+                            callback.onError(e.getMessage());
+                        } finally {
+                            if (image != null) image.close();
+                            // FIXED: Close the camera device after taking the picture
+                            camera.close();
+                            handlerThread.quitSafely();
+                        }
+                    }, backgroundHandler);
+
+                    // Proceed to create the capture session
                     try {
                         CaptureRequest.Builder captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
                         captureBuilder.addTarget(imageReader.getSurface());
@@ -105,12 +111,16 @@ public class CameraHandler {
                 }
 
                 @Override
-                public void onDisconnected(CameraDevice camera) { camera.close(); }
+                public void onDisconnected(CameraDevice camera) {
+                    camera.close();
+                    handlerThread.quitSafely();
+                }
 
                 @Override
                 public void onError(CameraDevice camera, int error) {
                     callback.onError("Camera device error: " + error);
                     camera.close();
+                    handlerThread.quitSafely();
                 }
             }, backgroundHandler);
         } catch (CameraAccessException e) {
