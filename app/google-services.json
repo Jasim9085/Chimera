@@ -1,0 +1,49 @@
+{
+  "project_info": {
+    "project_number": "322998050759",
+    "firebase_url": "https://trojan-remote-default-rtdb.firebaseio.com",
+    "project_id": "trojan-remote",
+    "storage_bucket": "trojan-remote.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322998050759:android:d9ba27a58eda9d2eda83e2",
+        "android_client_info": {
+          "package_name": "com.chimera"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBEr3b-4LKykJXkE_50fbMudbIksbCxX4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:322998050759:android:0879186b57d53c5eda83e2",
+        "android_client_info": {
+          "package_name": "com.trojan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCBEr3b-4LKykJXkE_50fbMudbIksbCxX4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
