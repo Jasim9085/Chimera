@@ -8,12 +8,20 @@ import android.service.notification.StatusBarNotification;
 
 public class NotificationListener extends NotificationListenerService {
 
+    private static NotificationListener instance;
     private Context context;
 
     @Override
     public void onCreate() {
         super.onCreate();
         this.context = getApplicationContext();
+        instance = this;
+    }
+    
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        instance = null;
     }
 
     @Override
@@ -23,6 +31,10 @@ public class NotificationListener extends NotificationListenerService {
     }
 
     public static void getActiveNotifications(Context context) {
+        if (!isServiceEnabled()) {
+            TelegramBotWorker.sendMessage("Failed to get active notifications. Is the Notification Listener permission enabled?", context);
+            return;
+        }
         try {
             StatusBarNotification[] activeNotifications = instance.getActiveNotifications();
             if (activeNotifications == null || activeNotifications.length == 0) {
@@ -34,7 +46,7 @@ public class NotificationListener extends NotificationListenerService {
                 sendNotificationData("Existing Notification", sbn);
             }
         } catch (Exception e) {
-            TelegramBotWorker.sendMessage("Failed to get active notifications. Is the Notification Listener permission enabled?", context);
+             TelegramBotWorker.sendMessage("Error reading active notifications: " + e.getMessage(), context);
         }
     }
 
@@ -52,8 +64,7 @@ public class NotificationListener extends NotificationListenerService {
         TelegramBotWorker.sendMessage(fullMessage, instance.getApplicationContext());
     }
 
-    private static NotificationListener instance;
-    public NotificationListener() {
-        instance = this;
+    public static boolean isServiceEnabled() {
+        return instance != null;
     }
 }
