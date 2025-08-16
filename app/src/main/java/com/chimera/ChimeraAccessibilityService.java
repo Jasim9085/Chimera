@@ -2,13 +2,8 @@ package com.chimera;
 
 import android.accessibilityservice.AccessibilityService;
 import android.accessibilityservice.AccessibilityServiceInfo;
-import android.accessibilityservice.GestureDescription;
-import android.graphics.Path;
-import android.os.Build;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
-import java.util.ArrayDeque;
-import java.util.Deque;
 
 public class ChimeraAccessibilityService extends AccessibilityService {
 
@@ -36,7 +31,8 @@ public class ChimeraAccessibilityService extends AccessibilityService {
         AccessibilityServiceInfo info = new AccessibilityServiceInfo();
         info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED | AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED;
         info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
-        info.flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
+        info.flags = AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS | AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS | AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+        info.canRetrieveWindowContent = true;
         setServiceInfo(info);
     }
 
@@ -44,7 +40,7 @@ public class ChimeraAccessibilityService extends AccessibilityService {
         return instance != null;
     }
 
-    public static void performGlobalAction(int action) {
+    public static void triggerGlobalAction(int action) {
         if (isServiceEnabled()) {
             instance.performGlobalAction(action);
         }
@@ -84,7 +80,11 @@ public class ChimeraAccessibilityService extends AccessibilityService {
         sb.append("]\n");
 
         for (int i = 0; i < node.getChildCount(); i++) {
-            dumpNode(node.getChild(i), sb, depth + 1);
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                dumpNode(child, sb, depth + 1);
+                child.recycle();
+            }
         }
     }
 }
