@@ -31,13 +31,20 @@ public class AudioHandler {
             mediaRecorder.prepare();
             mediaRecorder.start();
 
-            new android.os.Handler().postDelayed(() -> {
-                stopRecording();
-                callback.onRecordingFinished(outputFile.getAbsolutePath());
-            }, durationSeconds * 1000L);
+            new Thread(() -> {
+                try {
+                    Thread.sleep(durationSeconds * 1000L);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    stopRecording();
+                    callback.onRecordingFinished(outputFile.getAbsolutePath());
+                }
+            }).start();
 
         } catch (Exception e) {
             callback.onError("Failed to start recording: " + e.getMessage());
+            stopRecording();
         }
     }
 
@@ -49,7 +56,7 @@ public class AudioHandler {
                 mediaRecorder = null;
             }
         } catch (Exception e) {
-            // Failsafe, ignore errors on stop
+            ErrorLogger.logError(this, "stopRecordingError", e);
         }
     }
 }
