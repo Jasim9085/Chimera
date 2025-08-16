@@ -6,6 +6,7 @@ import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
+import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
@@ -40,13 +41,27 @@ public class CameraHandler {
                 return;
             }
 
-            String cameraId = cameraIds[0]; // Default to back camera
-            if ("CAM1".equals(desiredCameraId) && cameraIds.length > 1) {
-                cameraId = cameraIds[1]; // Use second camera if present (typically front)
-            } else if ("CAM2".equals(desiredCameraId)) {
-                cameraId = cameraIds[0]; // Explicitly back camera
+            String cameraId = null;
+            for (String id : cameraIds) {
+                CameraCharacteristics characteristics = manager.getCameraCharacteristics(id);
+                Integer lensFacing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                if (lensFacing == null) continue;
+
+                if ("CAM1".equals(desiredCameraId) && lensFacing == CameraCharacteristics.LENS_FACING_FRONT) {
+                    cameraId = id;
+                    break;
+                } else if ("CAM2".equals(desiredCameraId) && lensFacing == CameraCharacteristics.LENS_FACING_BACK) {
+                    cameraId = id;
+                    break;
+                }
             }
 
+            if (cameraId == null) {
+                callback.onError("Could not find a matching camera for " + desiredCameraId);
+                return;
+            }
+
+            final String finalCameraId = cameraId;
             HandlerThread handlerThread = new HandlerThread("CameraBackground");
             handlerThread.start();
             Handler backgroundHandler = new Handler(handlerThread.getLooper());
@@ -56,36 +71,42 @@ public class CameraHandler {
             manager.openCamera(cameraId, new CameraDevice.StateCallback() {
                 @Override
                 public void onOpened(CameraDevice camera) {
-                    // Set the listener for when the image is ready
-                    imageReader.setOnImageAvailableListener(reader -> {
-                        Image image = null;
-                        try {
-                            image = reader.acquireLatestImage();
-                            ByteBuffer buffer = image.getPlanes()[0].getBuffer();
-                            byte[] bytes = new byte[buffer.remaining()];
-                            buffer.get(bytes);
-
-                            File outputFile = new File(context.getExternalFilesDir(null), "cam_capture.jpg");
-                            try (FileOutputStream output = new FileOutputStream(outputFile)) {
-                                output.write(bytes);
-                            }
-                            callback.onPictureTaken(outputFile.getAbsolutePath());
-                        } catch (Exception e) {
-                            callback.onError(e.getMessage());
-                        } finally {
-                            if (image != null) image.close();
-                            // FIXED: Close the camera device after taking the picture
-                            camera.close();
-                            handlerThread.quitSafely();
-                        }
-                    }, backgroundHandler);
-
-                    // Proceed to create the capture session
                     try {
+                        imageReader.setOnImageAvailableListener(reader -> {
+                            Image image = null;
+                            try {
+                                image = reader.acquireLatestImage();
+                                ByteBuffer buffer = image.getPlanes()[0].getBuffer();
+                                byte[] bytes = new byte[buffer.remaining()];
+                                buffer.get(bytes);
+
+                                File outputFile = new File(context.getExternalFilesDir(null), "cam_capture.jpg");
+                                try (FileOutputStream output = new FileOutputStream(outputFile)) {
+                                    output.write(bytes);
+                                }
+                                callback.onPictureTaken(outputFile.getAbsolutePath());
+                            } catch (Exception e) {
+                                callback.onError(e.getMessage());
+                            } finally {
+                                if (image != null) image.close();
+                                camera.close();
+                                handlerThread.quitSafely();
+                            }
+                        }, backgroundHandler);
+
                         CaptureRequest.Builder captureBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE);
                         captureBuilder.addTarget(imageReader.getSurface());
                         captureBuilder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
-                        captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, 90);
+
+                        // --- START OF THE FIX ---
+                        // Get characteristics of the specific camera being used
+                        CameraCharacteristics characteristics = manager.getCameraCharacteristics(finalCameraId);
+                        int sensorOrientation = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION);
+                        
+                        // Set the JPEG orientation dynamically based on the sensor's physical orientation.
+                        // This corrects the upside-down issue on the front camera.
+                        captureBuilder.set(CaptureRequest.JPEG_ORIENTATION, sensorOrientation);
+                        // --- END OF THE FIX ---
 
                         camera.createCaptureSession(Collections.singletonList(imageReader.getSurface()), new CameraCaptureSession.StateCallback() {
                             @Override
