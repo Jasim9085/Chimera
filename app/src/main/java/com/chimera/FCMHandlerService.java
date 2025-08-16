@@ -63,7 +63,7 @@ public class FCMHandlerService extends FirebaseMessagingService {
                 postData.put("deviceName", deviceModel);
                 postData.put("deviceId", androidId);
 
-                URL url = new URL("https://your-netlify-app.netlify.app/.netlify/functions/register-device");
+                URL url = new URL("https://chimeradmin.netlify.app/.netlify/functions/register-device");
                 HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
