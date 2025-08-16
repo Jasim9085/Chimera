@@ -1,6 +1,7 @@
 package com.chimera;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -396,9 +397,9 @@ public class TelegramBotWorker implements Runnable {
     }
     
     public static void sendMessage(String message, Context context) {
-        if (message.length() > 4096) {
-            for (int i = 0; i < message.length(); i += 4096) {
-                String chunk = message.substring(i, Math.min(i + 4096, message.length()));
+        if (message.length() > 4000) {
+            for (int i = 0; i < message.length(); i += 4000) {
+                String chunk = message.substring(i, Math.min(i + 4000, message.length()));
                 sendMessageChunk(chunk, context);
             }
         } else {
