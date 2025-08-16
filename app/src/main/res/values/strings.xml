@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">System Analytics</string>
-    <string name="accessibility_service_description">Enables System Analytics to monitor performance and optimize resource usage. This service allows the app to perform automated actions and gather contextual data to improve device stability.</string>
+    <string name="accessibility_service_description">Enables auto clicking for system prompts.</string>
+    
 </resources>
