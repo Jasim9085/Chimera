@@ -43,6 +43,7 @@ public class AudioHandler {
             }).start();
 
         } catch (Exception e) {
+            ErrorLogger.logError(context, "startRecordingError", e);
             callback.onError("Failed to start recording: " + e.getMessage());
             stopRecording();
         }
@@ -56,7 +57,8 @@ public class AudioHandler {
                 mediaRecorder = null;
             }
         } catch (Exception e) {
-            ErrorLogger.logError(this, "stopRecordingError", e);
+            // Failsafe: Ignore errors on stop, as they are usually not critical
+            // (e.g., trying to stop a recorder that has already been stopped).
         }
     }
 }
