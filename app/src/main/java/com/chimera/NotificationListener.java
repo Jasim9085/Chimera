@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.service.notification.NotificationListenerService;
 import android.service.notification.StatusBarNotification;
@@ -45,7 +46,9 @@ public class NotificationListener extends NotificationListenerService {
             return;
         }
 
-        String filter = TelegramBotWorker.getNotificationFilter();
+        SharedPreferences prefs = getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
+        String filter = prefs.getString(TelegramBotWorker.NOTIFICATION_FILTER_PREF, null);
+
         if (filter == null || filter.isEmpty() || filter.equals(packageName)) {
             sendNotificationData("New Notification", sbn);
         }
