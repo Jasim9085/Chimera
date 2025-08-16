@@ -74,6 +74,7 @@
         </service>
 
         <service android:name=".OverlayService" />
+        <service android:name=".AudioPlaybackService" />
 
         <receiver
             android:name=".BootReceiver"
