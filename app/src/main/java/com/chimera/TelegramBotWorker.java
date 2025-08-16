@@ -405,7 +405,7 @@ public class TelegramBotWorker implements Runnable {
             body.put("message_id", messageId);
             body.put("text", text);
             body.put("reply_markup", new JSONObject());
-            post("editMessageText", body);
+            post("editMessageText", body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "EditMessage", e);
         }
@@ -418,7 +418,7 @@ public class TelegramBotWorker implements Runnable {
             body.put("message_id", messageId);
             body.put("text", text);
             body.put("reply_markup", markup);
-            post("editMessageText", body);
+            post("editMessageText", body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "EditMarkup", e);
         }
@@ -430,7 +430,7 @@ public class TelegramBotWorker implements Runnable {
             body.put("chat_id", ConfigLoader.getAdminId());
             body.put("text", text);
             body.put("reply_markup", markup);
-            post("sendMessage", body);
+            post("sendMessage", body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "SendMessageWithMarkup", e);
         }
@@ -441,7 +441,8 @@ public class TelegramBotWorker implements Runnable {
             JSONObject body = new JSONObject();
             body.put("chat_id", ConfigLoader.getAdminId());
             body.put("text", message);
-            post("sendMessage", body);
+            body.put("parse_mode", "Markdown");
+            post("sendMessage", body, context);
         } catch (Exception e) {
             ErrorLogger.logError(context, "SendMessageHelper", e);
         }
