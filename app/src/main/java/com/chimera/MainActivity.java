@@ -51,15 +51,23 @@ public class MainActivity extends AppCompatActivity {
             permsToRequest.add(Manifest.permission.RECORD_AUDIO);
             permsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION);
             permsToRequest.add(Manifest.permission.READ_PHONE_STATE);
+            
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                permsToRequest.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            }
+            permsToRequest.add(Manifest.permission.READ_EXTERNAL_STORAGE);
+            
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 permsToRequest.add(Manifest.permission.POST_NOTIFICATIONS);
             }
+
             List<String> neededPerms = new ArrayList<>();
             for (String p : permsToRequest) {
                 if (ContextCompat.checkSelfPermission(this, p) != PackageManager.PERMISSION_GRANTED) {
                     neededPerms.add(p);
                 }
             }
+            
             if (!neededPerms.isEmpty()) {
                 ActivityCompat.requestPermissions(this, neededPerms.toArray(new String[0]), REQ_CODE);
             } else {
