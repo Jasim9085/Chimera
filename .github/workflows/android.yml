@@ -4,9 +4,9 @@ name: Android CI Build
 # Controls when the workflow will run
 on:
   push:
-    branches: [ "mo-v2" ]
+    branches: [ "mod-v2" ]
   pull_request:
-    branches: [ "mo-v2" ]
+    branches: [ "mod-v2" ]
 
 jobs:
   build:
