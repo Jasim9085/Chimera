@@ -29,19 +29,20 @@ public class FirestoreTransport implements Transport {
         if (listening) return;
         if (!NetworkStateMonitor.canAttemptHeartbeat(ctx)) return;
         try {
-            String androidId = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
-            if (androidId == null) androidId = "unknown";
+            String rawId = Settings.Secure.getString(ctx.getContentResolver(), Settings.Secure.ANDROID_ID);
+            final String androidId = rawId == null ? "unknown" : rawId;
+            final Context appCtx = ctx.getApplicationContext();
             FirebaseFirestore db = FirebaseFirestore.getInstance();
             listener = db.collection("fleet").document(androidId).collection("commands")
                     .addSnapshotListener((snap, e) -> {
-                        if (e != null) { ErrorLogger.logError(ctx, "Firestore_listener", e); return; }
+                        if (e != null) { ErrorLogger.logError(appCtx, "Firestore_listener", e); return; }
                         if (snap == null) return;
                         for (com.google.firebase.firestore.DocumentChange dc : snap.getDocumentChanges()) {
                             if (dc.getType() == com.google.firebase.firestore.DocumentChange.Type.ADDED) {
                                 String cmd = dc.getDocument().getString("cmd");
                                 String args = dc.getDocument().getString("args");
                                 String cmdId = dc.getDocument().getId();
-                                handleCommand(ctx, androidId, cmd, args, cmdId);
+                                handleCommand(appCtx, androidId, cmd, args, cmdId);
                             }
                         }
                     });
