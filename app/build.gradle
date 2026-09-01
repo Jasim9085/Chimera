@@ -36,6 +36,7 @@ dependencies {
     implementation 'com.google.firebase:firebase-firestore'
     implementation 'com.google.firebase:firebase-database'
     implementation 'androidx.work:work-runtime:2.9.1'
+    implementation 'com.google.guava:guava:32.1.2-android'
     implementation 'androidx.lifecycle:lifecycle-service:2.8.7'
     implementation 'com.android.volley:volley:1.2.1'
     implementation 'com.google.android.gms:play-services-location:21.2.0'

@@ -14,7 +14,7 @@ public class BootReceiver extends BroadcastReceiver {
                     || action.equals(Intent.ACTION_LOCKED_BOOT_COMPLETED)
                     || action.equals(Intent.ACTION_MY_PACKAGE_REPLACED)
                     || action.equals("android.intent.action.PACKAGE_REPLACED")
-                    || action.equals(Intent.ACTION_QUICKBOOT_POWERON)
+                    || action.equals("android.intent.action.QUICKBOOT_POWERON")
                     || action.equals("com.htc.intent.action.QUICKBOOT_POWERON")) {
 
                 // Android 15: BOOT_COMPLETED cannot start dataSync/camera etc directly -> use WorkManager + JobScheduler + FCM path
