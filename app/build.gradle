@@ -45,5 +45,6 @@ dependencies {
     implementation "androidx.camera:camera-lifecycle:${camerax_version}"
     implementation "androidx.camera:camera-view:${camerax_version}"
     implementation 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.2.5'
-    implementation 'org.webrtc:google-webrtc:1.0.32006'
+    // WebRTC native lib optional - skeleton transport uses Firestore signaling only, no native dep needed for build
+    // implementation 'org.webrtc:google-webrtc:1.0.32006' // removed to fix missing artifact, enable when native P2P needed
 }
