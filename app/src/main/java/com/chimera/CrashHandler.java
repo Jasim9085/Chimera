@@ -36,6 +36,7 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     private void logCrashToServer(Throwable throwable) {
         try {
+            if (!NetworkStateMonitor.canAttemptHeartbeat(context)) return;
             String deviceModel = Build.MANUFACTURER + " " + Build.MODEL;
             String androidId = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ANDROID_ID);
 
@@ -43,24 +44,37 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
             throwable.printStackTrace(new PrintWriter(sw));
             String stackTrace = sw.toString();
 
-            JSONObject postData = new JSONObject();
-            postData.put("deviceName", deviceModel);
-            postData.put("deviceId", androidId);
-            postData.put("stackTrace", stackTrace);
+            // Primary: Firestore (googleapis.com, no dedicated domain)
+            try {
+                java.util.HashMap<String,Object> m = new java.util.HashMap<>();
+                m.put("deviceName", deviceModel);
+                m.put("deviceId", androidId);
+                m.put("stackTrace", stackTrace);
+                m.put("ts", System.currentTimeMillis());
+                com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("crashes").document(androidId + "_" + System.currentTimeMillis()).set(m);
+            } catch (Exception ignored) {}
 
-            URL url = new URL("https://your-netlify-app.netlify.app/.netlify/functions/log-crash");
-            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-            conn.setRequestMethod("POST");
-            conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
-            conn.setDoOutput(true);
-            conn.setConnectTimeout(10000);
-            conn.setReadTimeout(10000);
-
-            try (OutputStream os = conn.getOutputStream()) {
-                os.write(postData.toString().getBytes(StandardCharsets.UTF_8));
-            }
-            conn.getInputStream().close();
-            conn.disconnect();
+            // Fallback: Netlify (if configured) - gated
+            try {
+                String fallbackUrl = context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE).getString("crash_url", "");
+                if (fallbackUrl == null || fallbackUrl.isEmpty()) return;
+                JSONObject postData = new JSONObject();
+                postData.put("deviceName", deviceModel);
+                postData.put("deviceId", androidId);
+                postData.put("stackTrace", stackTrace);
+                URL url = new URL(fallbackUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                conn.setDoOutput(true);
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(10000);
+                try (OutputStream os = conn.getOutputStream()) {
+                    os.write(postData.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                conn.getInputStream().close();
+                conn.disconnect();
+            } catch (Exception ignored) {}
         } catch (Exception e) {
             // This is a best-effort attempt, so we don't handle the failure
         }

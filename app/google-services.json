@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "641122396883",
-    "project_id": "chimera-7a5cb",
-    "storage_bucket": "chimera-7a5cb.firebasestorage.app"
+    "project_number": "879851975889",
+    "firebase_url": "https://chimera-2026-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "chimera-2026",
+    "storage_bucket": "chimera-2026.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:641122396883:android:7b97a9d80660764e374226",
+        "mobilesdk_app_id": "1:879851975889:android:eeb59776722cb5dcd7c1f0",
         "android_client_info": {
           "package_name": "com.chimera"
         }
@@ -15,26 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAikeaAjNhScmGQnFxTL762EUESLCyzoVw"
-        }
-      ],
-      "services": {
-        "appinvite_service": {
-          "other_platform_oauth_client": []
-        }
-      }
-    },
-    {
-      "client_info": {
-        "mobilesdk_app_id": "1:641122396883:android:37920f47256f29d1374226",
-        "android_client_info": {
-          "package_name": "com.chimeraa"
-        }
-      },
-      "oauth_client": [],
-      "api_key": [
-        {
-          "current_key": "AIzaSyAikeaAjNhScmGQnFxTL762EUESLCyzoVw"
+          "current_key": "AIzaSyAW6nsfyfOcbLNWrQWcAoAq3pbsOoDnc1Q"
         }
       ],
       "services": {

